@@ -1038,7 +1038,7 @@ class _AndroidDocumentTouchInteractorState extends State<AndroidDocumentTouchInt
       return;
     }
 
-    if (_scrollingDrag != null) {
+    if (_scrollingDrag != null && _isScrolling) {
       // The user is trying to scroll the document. Change the scroll offset.
       _scrollingDrag!.update(details);
     }
