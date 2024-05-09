@@ -129,6 +129,7 @@ class SuperEditorAndroidControlsController {
     _shouldCaretBlink.dispose();
     _shouldShowMagnifier.dispose();
     _shouldShowToolbar.dispose();
+    caretJumpToOpaqueSignal.dispose();
   }
 
   /// Whether the caret should blink right now.
