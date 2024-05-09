@@ -979,7 +979,10 @@ class _AndroidDocumentTouchInteractorState extends State<AndroidDocumentTouchInt
     if (widget.selection.value?.isCollapsed == true) {
       final caretPosition = widget.selection.value!.extent;
       final tapDocumentOffset = widget.getDocumentLayout().getDocumentOffsetFromAncestorOffset(_globalTapDownOffset!);
-      final tapPosition = widget.getDocumentLayout().getDocumentPositionAtOffset(tapDocumentOffset)!;
+      final tapPosition = widget.getDocumentLayout().getDocumentPositionAtOffset(tapDocumentOffset);
+      if(tapPosition == null){
+        return;
+      }
       final isTapOverCaret = caretPosition.isEquivalentTo(tapPosition);
 
       if (isTapOverCaret) {
