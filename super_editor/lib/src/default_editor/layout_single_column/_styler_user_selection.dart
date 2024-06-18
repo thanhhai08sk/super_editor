@@ -143,9 +143,6 @@ class SingleColumnLayoutSelectionStyler extends SingleColumnLayoutStylePhase {
                       selectionHighlightColor: _selectionStyles.selectionColor,
                     )),
                     SpanRange(textSelection.start, textSelection.end - 1),
-                    // The selected range might already have a color attribution. We want to override it
-                    // with the selected text color.
-                    overwriteConflictingSpans: true,
                   ))
                 : viewModel.text;
 
