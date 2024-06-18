@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test_robots/flutter_test_robots.dart';
 import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:super_editor/super_editor_test.dart';
+import 'package:super_text_layout/super_text_layout.dart';
 
 import '../../test_runners.dart';
 import '../supereditor_test_tools.dart';
@@ -87,6 +89,25 @@ void main() {
       expect(SuperEditorInspector.isMobileMagnifierVisible(), isFalse);
     });
 
+    testWidgetsOnIos("does not show toolbar upon first tap", (tester) async {
+      await tester //
+          .createDocument()
+          .withTwoEmptyParagraphs()
+          .pump();
+
+      // Place the caret at the beginning of the document.
+      await tester.placeCaretInParagraph("1", 0);
+
+      // Ensure the toolbar isn't visible.
+      expect(SuperEditorInspector.isMobileToolbarVisible(), isFalse);
+
+      // Place the caret at the beginning of the second paragraph, at the same offset.
+      await tester.placeCaretInParagraph("2", 0);
+
+      // Ensure the toolbar isn't visible.
+      expect(SuperEditorInspector.isMobileToolbarVisible(), isFalse);
+    });
+
     testWidgetsOnIos("shows magnifier when dragging expanded handle", (tester) async {
       await _pumpSingleParagraphApp(tester);
 
@@ -107,6 +128,50 @@ void main() {
       // Resolve the gesture so that we don't have pending gesture timers.
       await gesture.up();
       await tester.pump(const Duration(milliseconds: 100));
+    });
+
+    testWidgetsOnIos("hides expanded handles and toolbar when deleting an expanded selection", (tester) async {
+      // Configure BlinkController to animate, otherwise it won't blink. We want to make sure
+      // the caret blinks after deleting the content.
+      BlinkController.indeterminateAnimationsEnabled = true;
+      addTearDown(() => BlinkController.indeterminateAnimationsEnabled = false);
+
+      await _pumpSingleParagraphApp(tester);
+
+      // Double tap to select "Lorem".
+      await tester.doubleTapInParagraph("1", 1);
+      await tester.pump();
+
+      // Ensure the toolbar and the drag handles are visible.
+      expect(SuperEditorInspector.isMobileToolbarVisible(), isTrue);
+      expect(SuperEditorInspector.findMobileExpandedDragHandles(), findsNWidgets(2));
+
+      // Press backspace to delete the word "Lorem" while the expanded handles are visible.
+      await tester.ime.backspace(getter: imeClientGetter);
+
+      // Ensure the toolbar and the drag handles were hidden.
+      expect(SuperEditorInspector.isMobileToolbarVisible(), isFalse);
+      expect(SuperEditorInspector.findMobileExpandedDragHandles(), findsNothing);
+
+      // Ensure caret is blinking.
+
+      expect(SuperEditorInspector.isCaretVisible(), true);
+
+      // Duration to switch between visible and invisible.
+      final flashPeriod = SuperEditorInspector.caretFlashPeriod();
+
+      // Trigger a frame with an ellapsed time equal to the flashPeriod,
+      // so the caret should change from visible to invisible.
+      await tester.pump(flashPeriod);
+
+      // Ensure caret is invisible after the flash period.
+      expect(SuperEditorInspector.isCaretVisible(), false);
+
+      // Trigger another frame to make caret visible again.
+      await tester.pump(flashPeriod);
+
+      // Ensure caret is visible.
+      expect(SuperEditorInspector.isCaretVisible(), true);
     });
 
     group("on device and web > shows ", () {

@@ -247,7 +247,7 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
   //       not collapsed/upstream/downstream. Change the type once it's working.
   HandleType? _dragHandleType;
 
-  final _magnifierOffset = ValueNotifier<Offset?>(null);
+  final _magnifierFocalPoint = ValueNotifier<Offset?>(null);
 
   Timer? _tapDownLongPressTimer;
   Offset? _globalTapDownOffset;
@@ -455,6 +455,11 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
     _tapDownLongPressTimer = Timer(kLongPressTimeout, _onLongPressDown);
   }
 
+  void _onTapCancel() {
+    _tapDownLongPressTimer?.cancel();
+    _tapDownLongPressTimer = null;
+  }
+
   // Runs when a tap down has lasted long enough to signify a long-press.
   void _onLongPressDown() {
     final interactorOffset = interactorBox.globalToLocal(_globalTapDownOffset!);
@@ -484,7 +489,7 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
       return;
     }
 
-    _magnifierOffset.value = _interactorOffsetToDocumentOffset(interactorBox.globalToLocal(_globalTapDownOffset!));
+    _placeFocalPointNearTouchOffset();
     _controlsController!
       ..hideToolbar()
       ..showMagnifier();
@@ -764,7 +769,7 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
 
     _controlsController!.showMagnifier();
 
-    _magnifierOffset.value = _interactorOffsetToDocumentOffset(interactorBox.globalToLocal(details.globalPosition));
+    _placeFocalPointNearTouchOffset();
   }
 
   void _updateSelectionForNewDragHandleLocation() {
@@ -790,7 +795,6 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
 
   void _onPanEnd(DragEndDetails details) {
     scrollPosition.removeListener(_onAutoScrollChange);
-    _magnifierOffset.value = null;
 
     if (_scrollingDrag != null) {
       // The user was performing a drag gesture to scroll the document.
@@ -810,7 +814,6 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
 
   void _onPanCancel() {
     scrollPosition.removeListener(_onAutoScrollChange);
-    _magnifierOffset.value = null;
 
     if (_scrollingDrag != null) {
       // The user was performing a drag gesture to scroll the document.
@@ -908,9 +911,8 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
   }
 
   void _updateMagnifierFocalPointOnAutoScrollFrame() {
-    if (_magnifierOffset.value != null) {
-      final interactorBox = context.findRenderObject() as RenderBox;
-      _magnifierOffset.value = _interactorOffsetToDocumentOffset(interactorBox.globalToLocal(_globalDragOffset!));
+    if (_magnifierFocalPoint.value != null) {
+      _placeFocalPointNearTouchOffset();
     }
   }
 
@@ -923,6 +925,28 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
       // This is needed to allow the user to stop scrolling by tapping down.
       scrollPosition.context.setIgnorePointer(false);
     });
+  }
+
+  /// Updates the magnifier focal point in relation to the current drag position.
+  void _placeFocalPointNearTouchOffset() {
+    late DocumentPosition? docPositionToMagnify;
+
+    if (_globalTapDownOffset != null) {
+      // A drag isn't happening. Magnify the position that the user tapped.
+      docPositionToMagnify =
+          _docLayout.getDocumentPositionNearestToOffset(_globalTapDownOffset! + Offset(0, scrollPosition.pixels));
+    } else {
+      final docDragDelta = _globalDragOffset! - _globalStartDragOffset!;
+      final dragScrollDelta = _dragStartScrollOffset! - scrollPosition.pixels;
+      docPositionToMagnify = _docLayout
+          .getDocumentPositionNearestToOffset(_startDragPositionOffset! + docDragDelta - Offset(0, dragScrollDelta));
+    }
+
+    final centerOfContentAtOffset = _interactorOffsetToDocumentOffset(
+      _docLayout.getRectForPosition(docPositionToMagnify!)!.center,
+    );
+
+    _magnifierFocalPoint.value = centerOfContentAtOffset;
   }
 
   @override
@@ -951,6 +975,7 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
           (TapSequenceGestureRecognizer recognizer) {
             recognizer
               ..onTapDown = _onTapDown
+              ..onTapCancel = _onTapCancel
               ..onTapUp = _onTapUp
               ..onDoubleTapUp = _onDoubleTapUp
               ..onTripleTapUp = _onTripleTapUp
@@ -1000,7 +1025,7 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
 
   Widget _buildMagnifierFocalPoint() {
     return ValueListenableBuilder(
-      valueListenable: _magnifierOffset,
+      valueListenable: _magnifierFocalPoint,
       builder: (context, magnifierOffset, child) {
         if (magnifierOffset == null) {
           return const SizedBox();
@@ -1098,7 +1123,8 @@ class SuperReaderIosMagnifierOverlayManager extends StatefulWidget {
 }
 
 @visibleForTesting
-class SuperReaderIosMagnifierOverlayManagerState extends State<SuperReaderIosMagnifierOverlayManager> {
+class SuperReaderIosMagnifierOverlayManagerState extends State<SuperReaderIosMagnifierOverlayManager>
+    with SingleTickerProviderStateMixin {
   final OverlayPortalController _overlayPortalController = OverlayPortalController();
   SuperReaderIosControlsController? _controlsContext;
 
@@ -1110,6 +1136,7 @@ class SuperReaderIosMagnifierOverlayManagerState extends State<SuperReaderIosMag
     super.didChangeDependencies();
 
     _controlsContext = SuperReaderIosControlsScope.rootOf(context);
+
     _overlayPortalController.show();
   }
 
@@ -1131,19 +1158,24 @@ class SuperReaderIosMagnifierOverlayManagerState extends State<SuperReaderIosMag
     return ValueListenableBuilder(
       valueListenable: _controlsContext!.shouldShowMagnifier,
       builder: (context, shouldShowMagnifier, child) {
-        if (!shouldShowMagnifier) {
-          return const SizedBox();
-        }
-
-        return child!;
+        return _controlsContext!.magnifierBuilder != null //
+            ? _controlsContext!.magnifierBuilder!(
+                context,
+                DocumentKeys.magnifier,
+                _controlsContext!.magnifierFocalPoint,
+                shouldShowMagnifier,
+              )
+            : _buildDefaultMagnifier(
+                context,
+                DocumentKeys.magnifier,
+                _controlsContext!.magnifierFocalPoint,
+                shouldShowMagnifier,
+              );
       },
-      child: _controlsContext!.magnifierBuilder != null //
-          ? _controlsContext!.magnifierBuilder!(context, DocumentKeys.magnifier, _controlsContext!.magnifierFocalPoint)
-          : _buildDefaultMagnifier(context, DocumentKeys.magnifier, _controlsContext!.magnifierFocalPoint),
     );
   }
 
-  Widget _buildDefaultMagnifier(BuildContext context, Key magnifierKey, LeaderLink magnifierFocalPoint) {
+  Widget _buildDefaultMagnifier(BuildContext context, Key magnifierKey, LeaderLink magnifierFocalPoint, bool visible) {
     if (CurrentPlatform.isWeb) {
       // Defer to the browser to display overlay controls on mobile.
       return const SizedBox();
@@ -1151,8 +1183,13 @@ class SuperReaderIosMagnifierOverlayManagerState extends State<SuperReaderIosMag
 
     return IOSFollowingMagnifier.roundedRectangle(
       magnifierKey: magnifierKey,
+      show: visible,
       leaderLink: magnifierFocalPoint,
-      offsetFromFocalPoint: const Offset(0, -72),
+      // The bottom of the magnifier sits above the focal point.
+      // Leave a few pixels between the bottom of the magnifier and the focal point. This
+      // value was chosen empirically.
+      offsetFromFocalPoint: const Offset(0, -20),
+      handleColor: _controlsContext!.handleColor,
     );
   }
 }

@@ -23,6 +23,7 @@ import 'package:super_editor/src/infrastructure/platforms/ios/floating_cursor.da
 import 'package:super_editor/src/infrastructure/platforms/ios/ios_document_controls.dart';
 import 'package:super_editor/src/infrastructure/platforms/ios/long_press_selection.dart';
 import 'package:super_editor/src/infrastructure/platforms/ios/magnifier.dart';
+import 'package:super_editor/src/infrastructure/platforms/ios/selection_heuristics.dart';
 import 'package:super_editor/src/infrastructure/platforms/mobile_documents.dart';
 import 'package:super_editor/src/infrastructure/platforms/platform.dart';
 import 'package:super_editor/src/infrastructure/signal_notifier.dart';
@@ -111,6 +112,7 @@ class SuperEditorIosControlsScope extends InheritedWidget {
 /// the caret, handles, floating cursor, magnifier, and toolbar.
 class SuperEditorIosControlsController {
   SuperEditorIosControlsController({
+    this.useIosSelectionHeuristics = true,
     this.handleColor,
     FloatingCursorController? floatingCursorController,
     this.magnifierBuilder,
@@ -124,6 +126,17 @@ class SuperEditorIosControlsController {
     _shouldShowMagnifier.dispose();
     _shouldShowToolbar.dispose();
   }
+
+  /// Whether to adjust the user's selection similar to the way iOS does.
+  ///
+  /// For example: iOS doesn't let users tap directly on a text offset. Instead,
+  /// iOS places the caret at the end of the word, or beginning of the word,
+  /// based on how close the user is to those locations when he taps.
+  ///
+  /// When this property is `true`, iOS-style heuristics should be used. When
+  /// this value is `false`, the user's gestures should directly impact the
+  /// area they touched.
+  final bool useIosSelectionHeuristics;
 
   /// Color of the text selection drag handles on iOS.
   final Color? handleColor;
@@ -227,6 +240,7 @@ class IosDocumentTouchInteractor extends StatefulWidget {
     required this.document,
     required this.getDocumentLayout,
     required this.selection,
+    required this.openSoftwareKeyboard,
     required this.scrollController,
     required this.dragHandleAutoScroller,
     this.contentTapHandler,
@@ -241,6 +255,9 @@ class IosDocumentTouchInteractor extends StatefulWidget {
   final Document document;
   final DocumentLayout Function() getDocumentLayout;
   final ValueListenable<DocumentSelection?> selection;
+
+  /// A callback that should open the software keyboard when invoked.
+  final VoidCallback openSoftwareKeyboard;
 
   /// Optional handler that responds to taps on content, e.g., opening
   /// a link when the user taps on text with a link attribution.
@@ -283,7 +300,9 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   Offset? _startDragPositionOffset;
   double? _dragStartScrollOffset;
   Offset? _globalDragOffset;
-  final _magnifierOffset = ValueNotifier<Offset?>(null);
+
+  /// The [Offset] of the magnifier's focal point in the [DocumentLayout] coordinate space.
+  final _magnifierFocalPointInDocumentSpace = ValueNotifier<Offset?>(null);
   Offset? _dragEndInInteractor;
   DragMode? _dragMode;
   // TODO: HandleType is the wrong type here, we need collapsed/base/extent,
@@ -486,11 +505,6 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
     return viewportBox.globalToLocal(globalOffset);
   }
 
-  Offset _viewportOffsetToDocumentOffset(Offset viewportOffset) {
-    final globalOffset = viewportBox.localToGlobal(viewportOffset);
-    return _docLayout.getDocumentOffsetFromAncestorOffset(globalOffset);
-  }
-
   RenderBox get interactorBox => context.findRenderObject() as RenderBox;
 
   /// Converts the given [interactorOffset] from the [DocumentInteractor]'s coordinate
@@ -577,12 +591,17 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
       return;
     }
 
-    _magnifierOffset.value = _interactorOffsetToDocumentOffset(interactorBox.globalToLocal(_globalTapDownOffset!));
+    _placeFocalPointNearTouchOffset();
     _controlsController!
       ..hideToolbar()
       ..showMagnifier();
 
     widget.focusNode.requestFocus();
+  }
+
+  void _onTapCancel() {
+    _tapDownLongPressTimer?.cancel();
+    _tapDownLongPressTimer = null;
   }
 
   void _onTapUp(TapUpDetails details) {
@@ -627,15 +646,28 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
         selection != null &&
         !selection.isCollapsed &&
         widget.document.doesSelectionContainPosition(selection, docPosition)) {
-      // The user tapped on an expanded selection. Toggle the toolbar.
+      // The user tapped on an expanded selection. Toggle the toolbar and show
+      // the software keyboard.
       _controlsController!.toggleToolbar();
+      widget.openSoftwareKeyboard();
       return;
     }
 
     if (docPosition != null) {
+      late final DocumentPosition adjustedSelectionPosition;
+      if (docPosition.nodePosition is TextNodePosition) {
+        // The user tapped a text position. Adjust the position to the start
+        // or end of the word, as per iOS behavior.
+        adjustedSelectionPosition = _moveTapPositionToWordBoundary(docPosition);
+      } else {
+        // Selection isn't text. Don't adjust the position.
+        adjustedSelectionPosition = docPosition;
+      }
+
       final didTapOnExistingSelection = selection != null &&
           selection.isCollapsed &&
-          selection.extent.nodePosition.isEquivalentTo(docPosition.nodePosition);
+          selection.extent.nodeId == adjustedSelectionPosition.nodeId &&
+          selection.extent.nodePosition.isEquivalentTo(adjustedSelectionPosition.nodePosition);
 
       if (didTapOnExistingSelection) {
         // Toggle the toolbar display when the user taps on the collapsed caret,
@@ -646,7 +678,7 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
         _controlsController!.hideToolbar();
       }
 
-      final tappedComponent = _docLayout.getComponentByNodeId(docPosition.nodeId)!;
+      final tappedComponent = _docLayout.getComponentByNodeId(adjustedSelectionPosition.nodeId)!;
       if (!tappedComponent.isVisualSelectionSupported()) {
         // The user tapped a non-selectable component.
         // Place the document selection at the nearest selectable node
@@ -656,13 +688,21 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
           document: widget.document,
           documentLayoutResolver: widget.getDocumentLayout,
           currentSelection: widget.selection.value,
-          startingNode: widget.document.getNodeById(docPosition.nodeId)!,
+          startingNode: widget.document.getNodeById(adjustedSelectionPosition.nodeId)!,
         );
         return;
       } else {
         // Place the document selection at the location where the
         // user tapped.
-        _selectPosition(docPosition);
+        _selectPosition(adjustedSelectionPosition);
+      }
+
+      if (didTapOnExistingSelection) {
+        // The user tapped on the existing selection. Show the software keyboard.
+        //
+        // If the user didn't tap on an existing selection, the software keyboard will
+        // already be visible.
+        widget.openSoftwareKeyboard();
       }
     } else {
       widget.editor.execute([
@@ -672,6 +712,25 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
     }
 
     widget.focusNode.requestFocus();
+  }
+
+  DocumentPosition _moveTapPositionToWordBoundary(DocumentPosition docPosition) {
+    if (!SuperEditorIosControlsScope.rootOf(context).useIosSelectionHeuristics) {
+      // iOS-style adjustments aren't desired. Don't adjust th given position.
+      return docPosition;
+    }
+
+    final text = (widget.document.getNodeById(docPosition.nodeId) as TextNode).text.text;
+    final tapOffset = (docPosition.nodePosition as TextNodePosition).offset;
+    if (tapOffset == text.length) {
+      return docPosition;
+    }
+    final adjustedSelectionOffset = IosHeuristics.adjustTapOffset(text, tapOffset);
+
+    return DocumentPosition(
+      nodeId: docPosition.nodeId,
+      nodePosition: TextNodePosition(offset: adjustedSelectionOffset),
+    );
   }
 
   void _onDoubleTapUp(TapUpDetails details) {
@@ -957,7 +1016,7 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
       dragEndInViewport: dragEndInViewport,
     );
 
-    _magnifierOffset.value = _interactorOffsetToDocumentOffset(interactorBox.globalToLocal(details.globalPosition));
+    _placeFocalPointNearTouchOffset();
   }
 
   void _updateSelectionForNewDragHandleLocation() {
@@ -1006,7 +1065,6 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   }
 
   void _onPanEnd(DragEndDetails details) {
-    _magnifierOffset.value = null;
     _controlsController!
       ..hideMagnifier()
       ..blinkCaret();
@@ -1034,8 +1092,6 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   }
 
   void _onPanCancel() {
-    _magnifierOffset.value = null;
-
     if (_scrollingDrag != null) {
       // The user was performing a drag gesture to scroll the document.
       // Cancel the drag gesture.
@@ -1087,9 +1143,8 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
   }
 
   void _updateMagnifierFocalPointOnAutoScrollFrame() {
-    if (_magnifierOffset.value != null) {
-      final interactorBox = context.findRenderObject() as RenderBox;
-      _magnifierOffset.value = _interactorOffsetToDocumentOffset(interactorBox.globalToLocal(_globalDragOffset!));
+    if (_magnifierFocalPointInDocumentSpace.value != null) {
+      _placeFocalPointNearTouchOffset();
     }
   }
 
@@ -1240,6 +1295,28 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
     });
   }
 
+  /// Updates the magnifier focal point in relation to the current drag position.
+  void _placeFocalPointNearTouchOffset() {
+    late DocumentPosition? docPositionToMagnify;
+
+    if (_globalTapDownOffset != null) {
+      // A drag isn't happening. Magnify the position that the user tapped.
+      docPositionToMagnify =
+          _docLayout.getDocumentPositionNearestToOffset(_globalTapDownOffset! + Offset(0, scrollPosition.pixels));
+    } else {
+      final docDragDelta = _globalDragOffset! - _globalStartDragOffset!;
+      final dragScrollDelta = _dragStartScrollOffset! - scrollPosition.pixels;
+      docPositionToMagnify = _docLayout
+          .getDocumentPositionNearestToOffset(_startDragPositionOffset! + docDragDelta - Offset(0, dragScrollDelta));
+    }
+
+    final centerOfContentAtOffset = _interactorOffsetToDocumentOffset(
+      _docLayout.getRectForPosition(docPositionToMagnify!)!.center,
+    );
+
+    _magnifierFocalPointInDocumentSpace.value = centerOfContentAtOffset;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.scrollController.hasClients) {
@@ -1266,6 +1343,7 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
           (TapSequenceGestureRecognizer recognizer) {
             recognizer
               ..onTapDown = _onTapDown
+              ..onTapCancel = _onTapCancel
               ..onTapUp = _onTapUp
               ..onDoubleTapUp = _onDoubleTapUp
               ..onTripleTapUp = _onTripleTapUp
@@ -1315,9 +1393,9 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
 
   Widget _buildMagnifierFocalPoint() {
     return ValueListenableBuilder(
-      valueListenable: _magnifierOffset,
-      builder: (context, magnifierOffset, child) {
-        if (magnifierOffset == null) {
+      valueListenable: _magnifierFocalPointInDocumentSpace,
+      builder: (context, magnifierFocalPoint, child) {
+        if (magnifierFocalPoint == null) {
           return const SizedBox();
         }
 
@@ -1325,8 +1403,8 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
         // are responsible for positioning the focal point for the
         // magnifier to follow. We do that here.
         return Positioned(
-          left: magnifierOffset.dx,
-          top: magnifierOffset.dy,
+          left: magnifierFocalPoint.dx,
+          top: magnifierFocalPoint.dy,
           child: Leader(
             link: _controlsController!.magnifierFocalPoint,
             child: const SizedBox(width: 1, height: 1),
@@ -1427,20 +1505,20 @@ class SuperEditorIosMagnifierOverlayManager extends StatefulWidget {
 }
 
 @visibleForTesting
-class SuperEditorIosMagnifierOverlayManagerState extends State<SuperEditorIosMagnifierOverlayManager> {
+class SuperEditorIosMagnifierOverlayManagerState extends State<SuperEditorIosMagnifierOverlayManager>
+    with SingleTickerProviderStateMixin {
   final OverlayPortalController _overlayPortalController = OverlayPortalController();
   SuperEditorIosControlsController? _controlsController;
+
+  @visibleForTesting
+  bool get wantsToDisplayMagnifier => _controlsController!.shouldShowMagnifier.value;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     _controlsController = SuperEditorIosControlsScope.rootOf(context);
     _overlayPortalController.show();
   }
-
-  @visibleForTesting
-  bool get wantsToDisplayMagnifier => _controlsController!.shouldShowMagnifier.value;
 
   @override
   Widget build(BuildContext context) {
@@ -1460,20 +1538,25 @@ class SuperEditorIosMagnifierOverlayManagerState extends State<SuperEditorIosMag
     return ValueListenableBuilder(
       valueListenable: _controlsController!.shouldShowMagnifier,
       builder: (context, shouldShowMagnifier, child) {
-        if (!shouldShowMagnifier) {
-          return const SizedBox();
-        }
-
-        return child!;
+        return _controlsController!.magnifierBuilder != null //
+            ? _controlsController!.magnifierBuilder!(
+                context,
+                DocumentKeys.magnifier,
+                _controlsController!.magnifierFocalPoint,
+                shouldShowMagnifier,
+              )
+            : _buildDefaultMagnifier(
+                context,
+                DocumentKeys.magnifier,
+                _controlsController!.magnifierFocalPoint,
+                shouldShowMagnifier,
+              );
       },
-      child: _controlsController!.magnifierBuilder != null //
-          ? _controlsController!.magnifierBuilder!(
-              context, DocumentKeys.magnifier, _controlsController!.magnifierFocalPoint)
-          : _buildDefaultMagnifier(context, DocumentKeys.magnifier, _controlsController!.magnifierFocalPoint),
     );
   }
 
-  Widget _buildDefaultMagnifier(BuildContext context, Key magnifierKey, LeaderLink magnifierFocalPoint) {
+  Widget _buildDefaultMagnifier(
+      BuildContext context, Key magnifierKey, LeaderLink magnifierFocalPoint, bool isVisible) {
     if (CurrentPlatform.isWeb) {
       // Defer to the browser to display overlay controls on mobile.
       return const SizedBox();
@@ -1482,7 +1565,12 @@ class SuperEditorIosMagnifierOverlayManagerState extends State<SuperEditorIosMag
     return IOSFollowingMagnifier.roundedRectangle(
       magnifierKey: magnifierKey,
       leaderLink: magnifierFocalPoint,
-      offsetFromFocalPoint: const Offset(0, -72),
+      show: isVisible,
+      // The bottom of the magnifier sits above the focal point.
+      // Leave a few pixels between the bottom of the magnifier and the focal point. This
+      // value was chosen empirically.
+      offsetFromFocalPoint: const Offset(0, -20),
+      handleColor: _controlsController!.handleColor,
     );
   }
 }
@@ -1794,9 +1882,16 @@ class SuperEditorIosToolbarFocalPointDocumentLayerBuilder implements SuperEditor
 class SuperEditorIosHandlesDocumentLayerBuilder implements SuperEditorLayerBuilder {
   const SuperEditorIosHandlesDocumentLayerBuilder({
     this.handleColor,
+    this.caretWidth,
+    this.handleBallDiameter,
   });
 
   final Color? handleColor;
+  final double? caretWidth;
+
+  /// The diameter of the small circle that appears on the top and bottom of
+  /// expanded iOS text handles.
+  final double? handleBallDiameter;
 
   @override
   ContentLayerWidget build(BuildContext context, SuperEditorContext editContext) {
@@ -1819,8 +1914,19 @@ class SuperEditorIosHandlesDocumentLayerBuilder implements SuperEditorLayerBuild
       handleColor: handleColor ??
           SuperEditorIosControlsScope.maybeRootOf(context)?.handleColor ??
           Theme.of(context).primaryColor,
+      caretWidth: caretWidth ?? 2,
+      handleBallDiameter: handleBallDiameter ?? defaultIosHandleBallDiameter,
       shouldCaretBlink: SuperEditorIosControlsScope.rootOf(context).shouldCaretBlink,
       floatingCursorController: SuperEditorIosControlsScope.rootOf(context).floatingCursorController,
     );
   }
 }
+
+const defaultIosMagnifierEnterAnimationDuration = Duration(milliseconds: 180);
+const defaultIosMagnifierExitAnimationDuration = Duration(milliseconds: 150);
+const defaultIosMagnifierAnimationCurve = Curves.easeInOut;
+const defaultIosMagnifierSize = Size(133, 96);
+
+/// The diameter of the small circle that appears on the top and bottom of
+/// expanded iOS text handles.
+const defaultIosHandleBallDiameter = 8.0;

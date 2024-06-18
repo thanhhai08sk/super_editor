@@ -46,11 +46,6 @@ class ScrollbarWithCustomPhysics extends StatelessWidget {
     this.notificationPredicate,
     this.interactive,
     this.scrollbarOrientation,
-    @Deprecated(
-      'Use ScrollbarThemeData.trackVisibility to resolve based on the current state instead. '
-      'This feature was deprecated after v3.4.0-19.0.pre.',
-    )
-    this.showTrackOnHover,
   });
 
   /// {@macro flutter.widgets.Scrollbar.child}
@@ -79,23 +74,7 @@ class ScrollbarWithCustomPhysics extends StatelessWidget {
   /// If the track visibility is related to the scrollbar's material state,
   /// use the global [ScrollbarThemeData.trackVisibility] or override the
   /// sub-tree's theme data.
-  ///
-  /// Replaces deprecated [showTrackOnHover].
   final bool? trackVisibility;
-
-  /// Controls if the track will show on hover and remain, including during drag.
-  ///
-  /// If this property is null, then [ScrollbarThemeData.showTrackOnHover] of
-  /// [ThemeData.scrollbarTheme] is used. If that is also null, the default value
-  /// is false.
-  ///
-  /// This is deprecated, [trackVisibility] or [ScrollbarThemeData.trackVisibility]
-  /// should be used instead.
-  @Deprecated(
-    'Use ScrollbarThemeData.trackVisibility to resolve based on the current state instead. '
-    'This feature was deprecated after v3.4.0-19.0.pre.',
-  )
-  final bool? showTrackOnHover;
 
   /// The thickness of the scrollbar in the cross axis of the scrollable.
   ///
@@ -145,7 +124,6 @@ class ScrollbarWithCustomPhysics extends StatelessWidget {
       controller: controller,
       thumbVisibility: thumbVisibility,
       trackVisibility: trackVisibility,
-      showTrackOnHover: showTrackOnHover,
       thickness: thickness,
       radius: radius,
       notificationPredicate: notificationPredicate,
@@ -163,7 +141,6 @@ class _MaterialScrollbar extends RawScrollbarWithCustomPhysics {
     super.controller,
     super.thumbVisibility,
     super.trackVisibility,
-    this.showTrackOnHover,
     super.thickness,
     super.radius,
     ScrollNotificationPredicate? notificationPredicate,
@@ -175,8 +152,6 @@ class _MaterialScrollbar extends RawScrollbarWithCustomPhysics {
           pressDuration: Duration.zero,
           notificationPredicate: notificationPredicate ?? defaultScrollNotificationPredicate,
         );
-
-  final bool? showTrackOnHover;
 
   @override
   _MaterialScrollbarState createState() => _MaterialScrollbarState();
@@ -197,21 +172,16 @@ class _MaterialScrollbarState extends RawScrollbarWithCustomPhysicsState<_Materi
   @override
   bool get enableGestures => widget.interactive ?? _scrollbarTheme.interactive ?? !_useAndroidScrollbar;
 
-  bool get _showTrackOnHover => widget.showTrackOnHover ?? _scrollbarTheme.showTrackOnHover ?? false;
-
-  MaterialStateProperty<bool> get _trackVisibility => MaterialStateProperty.resolveWith((Set<MaterialState> states) {
-        if (states.contains(MaterialState.hovered) && _showTrackOnHover) {
-          return true;
-        }
+  WidgetStateProperty<bool> get _trackVisibility => WidgetStateProperty.resolveWith((Set<WidgetState> states) {
         return widget.trackVisibility ?? _scrollbarTheme.trackVisibility?.resolve(states) ?? false;
       });
 
-  Set<MaterialState> get _states => <MaterialState>{
-        if (_dragIsActive) MaterialState.dragged,
-        if (_hoverIsActive) MaterialState.hovered,
+  Set<WidgetState> get _states => <WidgetState>{
+        if (_dragIsActive) WidgetState.dragged,
+        if (_hoverIsActive) WidgetState.hovered,
       };
 
-  MaterialStateProperty<Color> get _thumbColor {
+  WidgetStateProperty<Color> get _thumbColor {
     final Color onSurface = _colorScheme.onSurface;
     final Brightness brightness = _colorScheme.brightness;
     late Color dragColor;
@@ -230,8 +200,8 @@ class _MaterialScrollbarState extends RawScrollbarWithCustomPhysicsState<_Materi
             _useAndroidScrollbar ? Theme.of(context).highlightColor.withOpacity(1.0) : onSurface.withOpacity(0.3);
     }
 
-    return MaterialStateProperty.resolveWith((Set<MaterialState> states) {
-      if (states.contains(MaterialState.dragged)) {
+    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+      if (states.contains(WidgetState.dragged)) {
         return _scrollbarTheme.thumbColor?.resolve(states) ?? dragColor;
       }
 
@@ -249,10 +219,10 @@ class _MaterialScrollbarState extends RawScrollbarWithCustomPhysicsState<_Materi
     });
   }
 
-  MaterialStateProperty<Color> get _trackColor {
+  WidgetStateProperty<Color> get _trackColor {
     final Color onSurface = _colorScheme.onSurface;
     final Brightness brightness = _colorScheme.brightness;
-    return MaterialStateProperty.resolveWith((Set<MaterialState> states) {
+    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
       if (showScrollbar && _trackVisibility.resolve(states)) {
         return _scrollbarTheme.trackColor?.resolve(states) ??
             (brightness == Brightness.light ? onSurface.withOpacity(0.03) : onSurface.withOpacity(0.05));
@@ -261,10 +231,10 @@ class _MaterialScrollbarState extends RawScrollbarWithCustomPhysicsState<_Materi
     });
   }
 
-  MaterialStateProperty<Color> get _trackBorderColor {
+  WidgetStateProperty<Color> get _trackBorderColor {
     final Color onSurface = _colorScheme.onSurface;
     final Brightness brightness = _colorScheme.brightness;
-    return MaterialStateProperty.resolveWith((Set<MaterialState> states) {
+    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
       if (showScrollbar && _trackVisibility.resolve(states)) {
         return _scrollbarTheme.trackBorderColor?.resolve(states) ??
             (brightness == Brightness.light ? onSurface.withOpacity(0.1) : onSurface.withOpacity(0.25));
@@ -273,9 +243,9 @@ class _MaterialScrollbarState extends RawScrollbarWithCustomPhysicsState<_Materi
     });
   }
 
-  MaterialStateProperty<double> get _thickness {
-    return MaterialStateProperty.resolveWith((Set<MaterialState> states) {
-      if (states.contains(MaterialState.hovered) && _trackVisibility.resolve(states)) {
+  WidgetStateProperty<double> get _thickness {
+    return WidgetStateProperty.resolveWith((Set<WidgetState> states) {
+      if (states.contains(WidgetState.hovered) && _trackVisibility.resolve(states)) {
         return _scrollbarTheme.thickness?.resolve(states) ?? _kScrollbarThicknessWithTrack;
       }
       // The default scrollbar thickness is smaller on mobile.
