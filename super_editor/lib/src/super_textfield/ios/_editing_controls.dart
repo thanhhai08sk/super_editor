@@ -678,3 +678,5 @@ class IOSEditingOverlayController with ChangeNotifier {
     notifyListeners();
   }
 }
+
+const selectionHighlightBoxVerticalExpansion = 2.0;
