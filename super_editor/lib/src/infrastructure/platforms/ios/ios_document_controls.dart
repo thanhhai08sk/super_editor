@@ -895,3 +895,4 @@ class IosControlsDocumentLayerState extends DocumentLayoutLayerState<IosHandlesD
     );
   }
 }
+const selectionHighlightBoxVerticalExpansion = 2.0;
