@@ -25,7 +25,7 @@ void main() {
           .pump();
 
       final document = SuperEditorInspector.findDocument()!;
-      final firstParagraph = document.nodes.first as ParagraphNode;
+      final firstParagraph = document.first as ParagraphNode;
 
       final dragGesture = await tester.startDocumentDragFromPosition(
         from: DocumentPosition(
@@ -60,10 +60,11 @@ void main() {
           .pump();
 
       final document = SuperEditorInspector.findDocument()!;
-      final lastParagraph = document.nodes.last as ParagraphNode;
+      final lastParagraph = document.last as ParagraphNode;
 
       // Jump to the end of the document
       scrollController.jumpTo(scrollController.position.maxScrollExtent);
+      await tester.pump();
 
       final dragGesture = await tester.startDocumentDragFromPosition(
         from: DocumentPosition(
@@ -99,8 +100,8 @@ void main() {
           .pump();
 
       final document = SuperEditorInspector.findDocument()!;
-      final firstParagraph = document.nodes.first as ParagraphNode;
-      final lastParagraph = document.nodes.last as ParagraphNode;
+      final firstParagraph = document.first as ParagraphNode;
+      final lastParagraph = document.last as ParagraphNode;
 
       final dragGesture = await tester.startDocumentDragFromPosition(
         from: DocumentPosition(
@@ -144,8 +145,8 @@ void main() {
           .pump();
 
       final document = SuperEditorInspector.findDocument()!;
-      final firstParagraph = document.nodes.first as ParagraphNode;
-      final lastParagraph = document.nodes.last as ParagraphNode;
+      final firstParagraph = document.first as ParagraphNode;
+      final lastParagraph = document.last as ParagraphNode;
 
       // Place the caret at the end of the document, which causes the editor to
       // scroll to the bottom.
@@ -259,7 +260,7 @@ void main() {
           .forDesktop() //
           .pump();
       final document = SuperEditorInspector.findDocument()!;
-      final lastParagraph = document.nodes.last as ParagraphNode;
+      final lastParagraph = document.last as ParagraphNode;
 
       // Place the caret at the end of the document, which should cause the
       // editor to scroll to the bottom.
@@ -1071,7 +1072,7 @@ void main() {
 
         // Drag an arbitrary amount of pixels from the top of the editor.
         final dragGesture = await tester.dragByFrameCount(
-          startLocation: tester.getRect(find.byType(SuperEditor)).topCenter + const Offset(0, 5),
+          startLocation: tester.getRect(find.byType(CustomScrollView)).topCenter + const Offset(0, 5),
           totalDragOffset: const Offset(0, 400.0),
         );
 
@@ -1524,17 +1525,13 @@ class _SliverTestEditorState extends State<_SliverTestEditor> {
                   textAlign: TextAlign.center,
                 ),
               ),
-              SliverToBoxAdapter(
-                child: SuperEditor(
-                  editor: _docEditor,
-                  document: _doc,
-                  composer: _composer,
-                  stylesheet: defaultStylesheet.copyWith(
-                    documentPadding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
-                  ),
-                  gestureMode: widget.gestureMode,
-                  inputSource: TextInputSource.ime,
+              SuperEditor(
+                editor: _docEditor,
+                stylesheet: defaultStylesheet.copyWith(
+                  documentPadding: const EdgeInsets.symmetric(vertical: 56, horizontal: 24),
                 ),
+                gestureMode: widget.gestureMode,
+                inputSource: TextInputSource.ime,
               ),
               SliverList(
                 delegate: SliverChildBuilderDelegate(
