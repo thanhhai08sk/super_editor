@@ -996,7 +996,11 @@ class _ReadOnlyAndroidDocumentTouchInteractorState extends State<ReadOnlyAndroid
       return;
     }
 
-    final selection = widget.selection.value!;
+    final selection = widget.selection.value;
+    //fix scrolling issue when there are multiple superReaders at once
+    if(selection == null){
+      return;
+    }
     if (selection.isCollapsed) {
       readerGesturesLog.warning(
           "Tried to position toolbar for a collapsed selection in a read-only interactor. Collapsed selections shouldn't exist.");
