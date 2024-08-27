@@ -380,12 +380,17 @@ class ContentLayersElement extends RenderObjectElement {
       child.child?.detach();
     }
     renderObject.removeChild(child, slot!);
+
   }
 
   @override
   void visitChildren(ElementVisitor visitor) {
     if (_content != null) {
-      visitor(_content!);
+      try{
+        visitor(_content!);
+      }catch(e){
+        debugPrint("content_layers.dart visitChildren: error: $e");
+      }
     }
 
     // WARNING: Do not visit underlays or overlays when "locked". If you do, then the pipeline
