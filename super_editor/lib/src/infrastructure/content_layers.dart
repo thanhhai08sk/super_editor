@@ -370,27 +370,18 @@ class ContentLayersElement extends RenderObjectElement {
 
   @override
   void removeRenderObjectChild(RenderObject child, Object? slot) {
-    assert(child is RenderBox || child is RenderSliverToBoxAdapter);
+    assert(child is RenderBox);
     assert(child.parent == renderObject);
     assert(slot != null);
     assert(_isContentLayersSlot(slot!), "Invalid ContentLayers slot: $slot");
-    if (child is RenderSliverToBoxAdapter && child.attached) {
-      // Detach the child before removing it
-      child.detach();
-      child.child?.detach();
-    }
-    renderObject.removeChild(child, slot!);
 
+    renderObject.removeChild(child, slot!);
   }
 
   @override
   void visitChildren(ElementVisitor visitor) {
     if (_content != null) {
-      try{
-        visitor(_content!);
-      }catch(e){
-        debugPrint("content_layers.dart visitChildren: error: $e");
-      }
+      visitor(_content!);
     }
 
     // WARNING: Do not visit underlays or overlays when "locked". If you do, then the pipeline
