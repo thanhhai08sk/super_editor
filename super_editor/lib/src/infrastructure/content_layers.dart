@@ -377,6 +377,7 @@ class ContentLayersElement extends RenderObjectElement {
     if (child is RenderSliverToBoxAdapter && child.attached) {
       // Detach the child before removing it
       child.detach();
+      child.child?.detach();
     }
     renderObject.removeChild(child, slot!);
   }
