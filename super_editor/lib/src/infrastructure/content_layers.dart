@@ -370,7 +370,6 @@ class ContentLayersElement extends RenderObjectElement {
 
   @override
   void removeRenderObjectChild(RenderObject child, Object? slot) {
-    assert(child is RenderBox);
     assert(child.parent == renderObject);
     assert(slot != null);
     assert(_isContentLayersSlot(slot!), "Invalid ContentLayers slot: $slot");
