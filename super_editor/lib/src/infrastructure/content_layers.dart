@@ -370,12 +370,12 @@ class ContentLayersElement extends RenderObjectElement {
 
   @override
   void removeRenderObjectChild(RenderObject child, Object? slot) {
-    assert(child is RenderSliverToBoxAdapter);
+    debugPrint("content_layers.dart removeRenderObjectChild: $child");
     assert(child.parent == renderObject);
     assert(slot != null);
     assert(_isContentLayersSlot(slot!), "Invalid ContentLayers slot: $slot");
 
-    renderObject.removeChild((child as RenderSliverToBoxAdapter).child!, slot!);
+    renderObject.removeChild(child, slot!);
   }
 
   @override
