@@ -374,7 +374,7 @@ class ContentLayersElement extends RenderObjectElement {
     assert(child.parent == renderObject);
     assert(slot != null);
     assert(_isContentLayersSlot(slot!), "Invalid ContentLayers slot: $slot");
-    if (child is RenderSliverToBoxAdapter) {
+    if (child is RenderSliverToBoxAdapter && child.attached) {
       // Detach the child before removing it
       child.detach();
     }
