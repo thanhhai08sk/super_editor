@@ -14,14 +14,30 @@ import 'package:super_editor_quill/src/parsing/inline_formats.dart';
 ///       ]
 ///     }
 ///
+/// {@template parse_deltas_custom_editor}
+/// An [Editor] is used to insert content in the final document. For typical Delta
+/// formats, the default configuration for an [Editor] should work fine, and that's
+/// what this method uses. However, some apps need to run custom commands, especially
+/// for custom inline embeds. In that case, you can provide a [customEditor], which
+/// is configured however you'd like. The [customEditor] must contain a [MutableDocument]
+/// and a [MutableComposer]. The document must be empty.
+/// {@endtemplate}
+///
 /// For more information about the Quill Delta format, see the official
 /// documentation: https://quilljs.com/docs/delta/
 MutableDocument parseQuillDeltaDocument(
   Map<String, dynamic> deltaDocument, {
+  Editor? customEditor,
   List<BlockDeltaFormat> blockFormats = defaultBlockFormats,
   List<InlineDeltaFormat> inlineFormats = defaultInlineFormats,
+  List<InlineEmbedFormat> inlineEmbedFormats = const [],
 }) {
-  return parseQuillDeltaOps(deltaDocument["ops"], inlineFormats: inlineFormats);
+  return parseQuillDeltaOps(
+    deltaDocument["ops"],
+    customEditor: customEditor,
+    inlineFormats: inlineFormats,
+    inlineEmbedFormats: inlineEmbedFormats,
+  );
 }
 
 /// Parses a list Quill Delta operations (as JSON) into a [MutableDocument].
@@ -30,26 +46,53 @@ MutableDocument parseQuillDeltaDocument(
 /// directly accepts the operations list instead of the whole document map. This
 /// method is provided for convenience because in some situations only the
 /// operations are exchanged, rather than the whole document object.
+///
+/// {@macro parse_deltas_custom_editor}
 MutableDocument parseQuillDeltaOps(
   List<dynamic> deltaOps, {
+  Editor? customEditor,
   List<BlockDeltaFormat> blockFormats = defaultBlockFormats,
   List<InlineDeltaFormat> inlineFormats = defaultInlineFormats,
+  List<InlineEmbedFormat> inlineEmbedFormats = const [],
 }) {
   // Deserialize the delta operations JSON into a Dart data structure.
   final deltaDocument = Delta.fromJson(deltaOps);
 
-  // Create a new, empty Super Editor document.
-  final document = MutableDocument.empty();
-  final composer = MutableDocumentComposer();
-  final editor = Editor(
-    editables: {
-      Editor.documentKey: document,
-      Editor.composerKey: composer,
-    },
-    requestHandlers: List.from(defaultRequestHandlers),
-    // No reactions. Follow the delta operations exactly.
-    reactionPipeline: [],
-  );
+  late final MutableDocument document;
+  late final MutableDocumentComposer composer;
+  late final Editor editor;
+  if (customEditor != null) {
+    // Use the provided custom editor.
+    if (customEditor.context.maybeDocument == null) {
+      throw Exception("The provided customEditor must contain a MutableDocument in its editables.");
+    }
+    if (customEditor.context.maybeComposer == null) {
+      throw Exception("The provided customEditor must contain a MutableDocumentComposer in its editables.");
+    }
+
+    editor = customEditor;
+    document = editor.context.document;
+    composer = editor.context.composer;
+
+    if (document.nodeCount > 1 ||
+        document.first is! ParagraphNode ||
+        (document.first as ParagraphNode).text.length > 0) {
+      throw Exception("The customEditor document must be empty (contain a single, empty ParagraphNode).");
+    }
+  } else {
+    // Create a new, empty Super Editor document.
+    document = MutableDocument.empty();
+    composer = MutableDocumentComposer();
+    editor = Editor(
+      editables: {
+        Editor.documentKey: document,
+        Editor.composerKey: composer,
+      },
+      requestHandlers: List.from(defaultRequestHandlers),
+      // No reactions. Follow the delta operations exactly.
+      reactionPipeline: [],
+    );
+  }
 
   // Place the caret in the (only) empty paragraph so we can begin applying
   // deltas to the document.
@@ -68,7 +111,12 @@ MutableDocument parseQuillDeltaOps(
   // process the Super Editor document will reflect the desired Quill Delta
   // document state.
   for (final delta in deltaDocument.operations) {
-    delta.applyToDocument(editor, blockFormats: blockFormats, inlineFormats: inlineFormats);
+    delta.applyToDocument(
+      editor,
+      blockFormats: blockFormats,
+      inlineFormats: inlineFormats,
+      inlineEmbedFormats: inlineEmbedFormats,
+    );
   }
 
   return document;
@@ -119,6 +167,7 @@ extension OperationParser on Operation {
     Editor editor, {
     required List<BlockDeltaFormat> blockFormats,
     required List<InlineDeltaFormat> inlineFormats,
+    required List<InlineEmbedFormat> inlineEmbedFormats,
   }) {
     final document = editor.context.find<MutableDocument>(Editor.documentKey);
     final composer = editor.context.find<MutableDocumentComposer>(Editor.composerKey);
@@ -131,7 +180,7 @@ extension OperationParser on Operation {
         }
         if (data is Object) {
           // This is an embed insertion delta.
-          _doInsertMedia(editor, composer);
+          _doInsertMedia(editor, composer, inlineEmbedFormats);
         }
 
         // Deduplicate all back-to-back code blocks.
@@ -224,6 +273,13 @@ extension OperationParser on Operation {
       final blockChanges = blockFormat.applyTo(this, editor);
       if (blockChanges != null) {
         changeRequests.addAll(blockChanges);
+
+        // We found a format that handled this delta. Ignore the remaining
+        // formats.
+        //
+        // If a situation is found where multiple formats need to act on the same
+        // delta, please file an issue with an explanation.
+        break;
       }
     }
 
@@ -295,12 +351,50 @@ extension OperationParser on Operation {
     editor.execute(changeRequests);
   }
 
-  void _doInsertMedia(Editor editor, DocumentComposer composer) {
+  void _doInsertMedia(Editor editor, DocumentComposer composer, List<InlineEmbedFormat> inlineEmbedFormats) {
     final content = data;
     if (content is! Map<String, dynamic>) {
-      // We don't know what this is.
+      // Quill Deltas expect embeds to be a map, but the data isn't a map.
       return;
     }
+
+    // First, try to interpret this operation as an inline embed and insert it.
+    final didInlineInsert = _maybeInsertInlineEmbed(editor, composer, inlineEmbedFormats, content);
+    if (didInlineInsert) {
+      return;
+    }
+
+    // This operation wasn't a known inline embed. Try inserting as a block embed.
+    _maybeInsertBlockEmbed(editor, composer);
+  }
+
+  /// Attempts to interpret this operation as an inline embed and insert it, returning `true`
+  /// if successful, or `false` if this operation isn't a known inline embed.
+  bool _maybeInsertInlineEmbed(
+    Editor editor,
+    DocumentComposer composer,
+    List<InlineEmbedFormat> inlineEmbedFormats,
+    Map<String, dynamic> data,
+  ) {
+    for (final inlineEmbedFormat in inlineEmbedFormats) {
+      final didInsert = inlineEmbedFormat.insert(editor, composer, data);
+      if (didInsert) {
+        // We found a format that handled this inline embed. Ignore the remaining
+        // formats.
+        //
+        // If a situation is found where multiple formats need to act on the same
+        // embed, please file an issue with an explanation.
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /// Attempts to interpret this operation as a block embed and insert it, returning `true`
+  /// if successful, or `false` if this operation isn't a known block embed.
+  bool _maybeInsertBlockEmbed(Editor editor, DocumentComposer composer) {
+    final content = data as Map<String, dynamic>;
 
     // Check if the selected node is an empty text node. If it is, we want to replace it
     // with the media that we're inserting.
@@ -355,7 +449,7 @@ extension OperationParser on Operation {
 
     if (newNode == null) {
       // We didn't find any media to insert.
-      return;
+      return false;
     }
 
     // Insert the media in the document.
@@ -388,6 +482,9 @@ extension OperationParser on Operation {
         SelectionReason.contentChange,
       ),
     ]);
+
+    // This operation is a block embed and we were able to insert the appropriate media.
+    return true;
   }
 
   /// Moves [count] units downstream from the current caret position.
