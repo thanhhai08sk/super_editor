@@ -290,7 +290,7 @@ class DocumentImeSerializer {
       }
     }
 
-    //My workaround: if the IME position is not found in any of the ranges, return the last position.
+    //My workaround: if the IME position is not found in any of the ranges, return the last position....
     final range = imeRangesToDocTextNodes.keys.last;
     return DocumentPosition(
       nodeId: imeRangesToDocTextNodes.values.last,
