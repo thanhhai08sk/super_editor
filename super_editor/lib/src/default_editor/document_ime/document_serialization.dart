@@ -176,7 +176,7 @@ class DocumentImeSerializer {
     );
     editorImeLog.fine("Selection extent: $extent");
 
-    return DocumentSelection(base: base, extent: extent);
+    return base != null && extent != null ? DocumentSelection(base: base, extent: extent) : null;
   }
 
   DocumentRange? imeToDocumentRange(TextRange imeRange) {
@@ -214,16 +214,20 @@ class DocumentImeSerializer {
       editorImeLog.fine("The IME is only composing visible characters. No adjustment necessary.");
     }
 
-    return DocumentRange(
-      start: _imeToDocumentPosition(
-        TextPosition(offset: imeRange.start),
-        isUpstream: false,
-      ),
-      end: _imeToDocumentPosition(
-        TextPosition(offset: imeRange.end),
-        isUpstream: false,
-      ),
+    final start = _imeToDocumentPosition(
+      TextPosition(offset: imeRange.start),
+      isUpstream: false,
     );
+
+    final end = _imeToDocumentPosition(
+      TextPosition(offset: imeRange.end),
+      isUpstream: false,
+    );
+
+    return start != null && end != null ? DocumentRange(
+      start: start,
+      end: end,
+    ) : null;
   }
 
   /// Returns `true` if the [imePosition] is inside the prepended placeholder,
@@ -262,7 +266,7 @@ class DocumentImeSerializer {
         : const TextPosition(offset: 0);
   }
 
-  DocumentPosition _imeToDocumentPosition(TextPosition imePosition, {required bool isUpstream}) {
+  DocumentPosition? _imeToDocumentPosition(TextPosition imePosition, {required bool isUpstream}) {
     for (final range in imeRangesToDocTextNodes.keys) {
       if (range.start <= imePosition.offset && imePosition.offset <= range.end) {
         final node = _doc.getNodeById(imeRangesToDocTextNodes[range]!)!;
@@ -289,14 +293,8 @@ class DocumentImeSerializer {
         }
       }
     }
-
-    //My workaround: if the IME position is not found in any of the ranges, return the last position....
-    final range = imeRangesToDocTextNodes.keys.last;
-    return DocumentPosition(
-      nodeId: imeRangesToDocTextNodes.values.last,
-      nodePosition: TextNodePosition(offset: imePosition.offset - range.start),
-    );
-
+    //My workaround: if the IME position is not found in any of the ranges, return null
+    return null;
 
     editorImeLog.shout("---------------DocumentImeSerializer----------------------");
     editorImeLog.shout("Couldn't map an IME position to a document position.");
