@@ -33,7 +33,7 @@ class BlockquoteComponentBuilder implements ComponentBuilder {
       return null;
     }
 
-    final textDirection = getParagraphDirection(node.text.text);
+    final textDirection = getParagraphDirection(node.text.toPlainText());
 
     TextAlign textAlign = (textDirection == TextDirection.ltr) ? TextAlign.left : TextAlign.right;
     final textAlignName = node.getMetadataValue('textAlign');
@@ -95,6 +95,7 @@ class BlockquoteComponentViewModel extends SingleColumnLayoutComponentViewModel 
     EdgeInsetsGeometry padding = EdgeInsets.zero,
     required this.text,
     required this.textStyleBuilder,
+    this.inlineWidgetBuilders = const [],
     this.textDirection = TextDirection.ltr,
     this.textAlignment = TextAlign.left,
     this.indent = 0,
@@ -125,6 +126,8 @@ class BlockquoteComponentViewModel extends SingleColumnLayoutComponentViewModel 
   AttributedText text;
   @override
   AttributionStyleBuilder textStyleBuilder;
+  @override
+  InlineWidgetBuilderChain inlineWidgetBuilders;
   @override
   TextDirection textDirection;
   @override
@@ -158,6 +161,7 @@ class BlockquoteComponentViewModel extends SingleColumnLayoutComponentViewModel 
       padding: padding,
       text: text,
       textStyleBuilder: textStyleBuilder,
+      inlineWidgetBuilders: inlineWidgetBuilders,
       textDirection: textDirection,
       textAlignment: textAlignment,
       indent: indent,
@@ -227,6 +231,7 @@ class BlockquoteComponent extends StatelessWidget {
     required this.textKey,
     required this.text,
     required this.styleBuilder,
+    this.inlineWidgetBuilders = const [],
     this.textSelection,
     this.indent = 0,
     this.indentCalculator = defaultParagraphIndentCalculator,
@@ -241,6 +246,7 @@ class BlockquoteComponent extends StatelessWidget {
   final GlobalKey textKey;
   final AttributedText text;
   final AttributionStyleBuilder styleBuilder;
+  final InlineWidgetBuilderChain inlineWidgetBuilders;
   final TextSelection? textSelection;
   final int indent;
   final TextBlockIndentCalculator indentCalculator;
@@ -275,6 +281,7 @@ class BlockquoteComponent extends StatelessWidget {
                 key: textKey,
                 text: text,
                 textStyleBuilder: styleBuilder,
+                inlineWidgetBuilders: inlineWidgetBuilders,
                 textSelection: textSelection,
                 selectionColor: selectionColor,
                 highlightWhenEmpty: highlightWhenEmpty,
@@ -286,148 +293,5 @@ class BlockquoteComponent extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class ConvertBlockquoteToParagraphCommand extends EditCommand {
-  ConvertBlockquoteToParagraphCommand({
-    required this.nodeId,
-  });
-
-  final String nodeId;
-
-  @override
-  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
-
-  @override
-  void execute(EditContext context, CommandExecutor executor) {
-    final document = context.document;
-    final node = document.getNodeById(nodeId);
-    final blockquote = node as ParagraphNode;
-    final newParagraphNode = ParagraphNode(
-      id: blockquote.id,
-      text: blockquote.text,
-    );
-    document.replaceNode(oldNode: blockquote, newNode: newParagraphNode);
-
-    executor.logChanges([
-      DocumentEdit(
-        NodeChangeEvent(nodeId),
-      )
-    ]);
-  }
-}
-
-ExecutionInstruction insertNewlineInBlockquote({
-  required SuperEditorContext editContext,
-  required KeyEvent keyEvent,
-}) {
-  if (keyEvent.logicalKey != LogicalKeyboardKey.enter) {
-    return ExecutionInstruction.continueExecution;
-  }
-
-  if (!HardwareKeyboard.instance.isShiftPressed) {
-    return ExecutionInstruction.continueExecution;
-  }
-
-  if (editContext.composer.selection == null) {
-    return ExecutionInstruction.continueExecution;
-  }
-
-  final baseNode = editContext.document.getNodeById(editContext.composer.selection!.base.nodeId)!;
-  final extentNode = editContext.document.getNodeById(editContext.composer.selection!.extent.nodeId)!;
-  if (baseNode.id != extentNode.id) {
-    return ExecutionInstruction.continueExecution;
-  }
-  if (extentNode is! ParagraphNode) {
-    return ExecutionInstruction.continueExecution;
-  }
-  if (extentNode.getMetadataValue('blockType') != blockquoteAttribution) {
-    return ExecutionInstruction.continueExecution;
-  }
-
-  final didInsertNewline = editContext.commonOps.insertPlainText('\n');
-  return didInsertNewline ? ExecutionInstruction.haltExecution : ExecutionInstruction.continueExecution;
-}
-
-ExecutionInstruction splitBlockquoteWhenEnterPressed({
-  required SuperEditorContext editContext,
-  required KeyEvent keyEvent,
-}) {
-  if (keyEvent.logicalKey != LogicalKeyboardKey.enter) {
-    return ExecutionInstruction.continueExecution;
-  }
-
-  if (editContext.composer.selection == null) {
-    return ExecutionInstruction.continueExecution;
-  }
-
-  final baseNode = editContext.document.getNodeById(editContext.composer.selection!.base.nodeId)!;
-  final extentNode = editContext.document.getNodeById(editContext.composer.selection!.extent.nodeId)!;
-  if (baseNode.id != extentNode.id) {
-    return ExecutionInstruction.continueExecution;
-  }
-  if (extentNode is! ParagraphNode) {
-    return ExecutionInstruction.continueExecution;
-  }
-  if (extentNode.getMetadataValue('blockType') != blockquoteAttribution) {
-    return ExecutionInstruction.continueExecution;
-  }
-
-  final didSplit = editContext.commonOps.insertBlockLevelNewline();
-  return didSplit ? ExecutionInstruction.haltExecution : ExecutionInstruction.continueExecution;
-}
-
-class SplitBlockquoteCommand extends EditCommand {
-  SplitBlockquoteCommand({
-    required this.nodeId,
-    required this.splitPosition,
-    required this.newNodeId,
-  });
-
-  final String nodeId;
-  final TextPosition splitPosition;
-  final String newNodeId;
-
-  @override
-  HistoryBehavior get historyBehavior => HistoryBehavior.undoable;
-
-  @override
-  void execute(EditContext context, CommandExecutor executor) {
-    final document = context.document;
-    final node = document.getNodeById(nodeId);
-    final blockquote = node as ParagraphNode;
-    final text = blockquote.text;
-    final startText = text.copyText(0, splitPosition.offset);
-    final endText = splitPosition.offset < text.length ? text.copyText(splitPosition.offset) : AttributedText();
-
-    // Change the current node's content to just the text before the caret.
-    // TODO: figure out how node changes should work in terms of
-    //       a DocumentEditorTransaction (#67)
-    blockquote.text = startText;
-
-    // Create a new node that will follow the current node. Set its text
-    // to the text that was removed from the current node.
-    final isNewNodeABlockquote = endText.text.isNotEmpty;
-    final newNode = ParagraphNode(
-      id: newNodeId,
-      text: endText,
-      metadata: isNewNodeABlockquote ? {'blockType': blockquoteAttribution} : {},
-    );
-
-    // Insert the new node after the current node.
-    document.insertNodeAfter(
-      existingNode: node,
-      newNode: newNode,
-    );
-
-    executor.logChanges([
-      DocumentEdit(
-        NodeChangeEvent(nodeId),
-      ),
-      DocumentEdit(
-        NodeInsertedEvent(newNodeId, document.getNodeIndexById(newNodeId)),
-      ),
-    ]);
   }
 }

@@ -2,6 +2,8 @@
 
 import 'package:logging/logging.dart' as logging;
 
+export 'package:logging/logging.dart' show Level;
+
 class LogNames {
   static const editor = 'editor';
   static const editorEdits = 'editor.edits';
@@ -43,12 +45,20 @@ class LogNames {
   static const iosTextField = 'textfield.ios';
 
   static const infrastructure = 'infrastructure';
+  static const keyboardPanel = 'infrastructure.keyboardPanel';
   static const longPressSelection = 'infrastructure.gestures.longPress';
   static const scheduler = 'infrastructure.scheduler';
   static const contentLayers = 'infrastructure.content_layers';
   static const attributions = 'infrastructure.attributions';
 }
 
+// Chat
+final messagePageElementLog = logging.Logger('chat.messagePage.element');
+final messagePageLayoutLog = logging.Logger('chat.messagePage.layout');
+final messagePagePaintLog = logging.Logger('chat.messagePage.paint');
+final messageEditorHeightLog = logging.Logger('chat.messagePage.editorHeight');
+
+// Super Editor
 final editorLog = logging.Logger(LogNames.editor);
 final editorEditsLog = logging.Logger(LogNames.editorEdits);
 final editorPoliciesLog = logging.Logger(LogNames.editorPolicies);
@@ -70,6 +80,7 @@ final editorPatternTagsLog = logging.Logger(LogNames.editorHashTags);
 final editorActionTagsLog = logging.Logger(LogNames.editorActionTags);
 final editorSpellingAndGrammarLog = logging.Logger(LogNames.editorSpellingAndGrammar);
 
+// Super Reader
 final readerLog = logging.Logger(LogNames.reader);
 final readerScrollingLog = logging.Logger(LogNames.readerScrolling);
 final readerGesturesLog = logging.Logger(LogNames.readerGestures);
@@ -88,6 +99,7 @@ final iosTextFieldLog = logging.Logger(LogNames.iosTextField);
 
 final docGesturesLog = logging.Logger(LogNames.documentGestures);
 final infrastructureLog = logging.Logger(LogNames.infrastructure);
+final keyboardPanelLog = logging.Logger(LogNames.keyboardPanel);
 final longPressSelectionLog = logging.Logger(LogNames.longPressSelection);
 final schedulerLog = logging.Logger(LogNames.scheduler);
 final contentLayersLog = logging.Logger(LogNames.contentLayers);

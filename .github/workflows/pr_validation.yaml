@@ -93,6 +93,13 @@ jobs:
       # Run all golden tests
       - run: flutter test test_goldens
 
+      # Archive golden failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: golden-failures
+          path: "**/failures/**/*.png"
+
   test_super_editor_markdown:
     runs-on: ubuntu-latest
     defaults:
@@ -133,6 +140,66 @@ jobs:
       - run: flutter pub get
 
       # TODO: Enforce static analysis
+
+      # Run all tests
+      - run: flutter test
+
+  test_super_editor_spellcheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./super_editor_spellcheck
+    steps:
+      # Checkout the PR branch
+      - uses: actions/checkout@v3
+
+      # Setup Flutter environment
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "master"
+
+      # Download all the packages that the app uses
+      - run: flutter pub get
+
+      # Run all tests
+      - run: flutter test
+
+  analyze_super_keyboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./super_keyboard
+    steps:
+      # Checkout the PR branch
+      - uses: actions/checkout@v3
+
+      # Setup Flutter environment
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "master"
+
+      # Download all the packages that the app uses
+      - run: flutter pub get
+
+      # Enforce static analysis
+      - run: flutter analyze
+
+  test_super_keyboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./super_keyboard
+    steps:
+      # Checkout the PR branch
+      - uses: actions/checkout@v3
+
+      # Setup Flutter environment
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: "master"
+
+      # Download all the packages that the app uses
+      - run: flutter pub get
 
       # Run all tests
       - run: flutter test
@@ -198,6 +265,13 @@ jobs:
 
       # Run all golden tests
       - run: flutter test test_goldens
+
+      # Archive golden failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: golden-failures
+          path: "**/failures/**/*.png"
 
   analyze_attributed_text:
     runs-on: ubuntu-latest

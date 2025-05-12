@@ -292,7 +292,7 @@ void main() {
       );
     });
 
-    testWidgetsOnAndroid("auto-scrolls to caret position when dragging the spacebar (on Android)", (tester) async {
+    testWidgetsOnAndroid("auto-scrolls to caret position when dragging the spacebar", (tester) async {
       // Pump an editor with a size that will cause it to be scrollable.
       const windowSize = Size(800, 400);
       tester.view.physicalSize = windowSize;
@@ -306,7 +306,7 @@ void main() {
       // Place the caret at the beginning of the document.
       await tester.placeCaretInParagraph('1', 0);
 
-      final paragraphImeText = '. ${SuperEditorInspector.findTextInComponent('1').text}';
+      final paragraphImeText = '. ${SuperEditorInspector.findTextInComponent('1').toPlainText()}';
 
       // Simulate the user dragging the spacebar to move the caret to
       // "In aliquet convallis efficitur|.". This position was chosen arbitrarily, we
@@ -749,7 +749,7 @@ void main() {
 
       await tester //
           .createDocument()
-          .withSingleParagraph()
+          .withLongDoc()
           .withScrollController(scrollController)
           .pump();
 
@@ -781,7 +781,7 @@ void main() {
 
       await tester //
           .createDocument()
-          .withSingleParagraph()
+          .withLongDoc()
           .withScrollController(scrollController)
           .pump();
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 import 'package:super_text_layout/super_text_layout.dart';
 
+import '../../test_runners.dart';
 import '../supereditor_test_tools.dart';
 
 void main() {
@@ -101,18 +103,134 @@ void main() {
       });
     });
 
+    group('newlines >', () {
+      testWidgetsOnAllPlatforms("does nothing when caret is in non-deletable task", (tester) async {
+        await tester
+            .createDocument()
+            .withCustomContent(
+              MutableDocument(
+                nodes: [
+                  ListItemNode.unordered(
+                    id: "1",
+                    text: AttributedText("Non-deletable list item."),
+                    metadata: const {
+                      NodeMetadata.isDeletable: false,
+                    },
+                  ),
+                  ParagraphNode(
+                    id: "2",
+                    text: AttributedText("A deletable paragraph."),
+                  ),
+                ],
+              ),
+            )
+            .pump();
+
+        // Place caret in the middle of the non-deletable list item.
+        await tester.placeCaretInParagraph("1", 5);
+
+        // Press enter to try to split the list item.
+        switch (debugDefaultTargetPlatformOverride) {
+          case TargetPlatform.android:
+          case TargetPlatform.iOS:
+            // FIXME: pressEnterWithIme should work, but it seems to think there are no
+            //        connected IME clients, so it fizzles. For now, we use the implementation
+            //        directly.
+            // await tester.pressEnterWithIme();
+            await tester.testTextInput.receiveAction(TextInputAction.newline);
+          case TargetPlatform.macOS:
+          case TargetPlatform.windows:
+          case TargetPlatform.linux:
+          case TargetPlatform.fuchsia:
+          case null:
+            await tester.pressEnter();
+        }
+
+        // Ensure the list item wasn't changed.
+        final document = SuperEditorInspector.findDocument()!;
+        expect(document.nodeCount, 2);
+        expect(document.first.asTextNode.text.toPlainText(), "Non-deletable list item.");
+        expect(document.first, isA<ListItemNode>());
+      });
+
+      testWidgetsOnAllPlatforms("does nothing when non-deletable content is selected", (tester) async {
+        final editContext = await tester
+            .createDocument()
+            .withCustomContent(
+              MutableDocument(
+                nodes: [
+                  ListItemNode.ordered(
+                    id: "1",
+                    text: AttributedText("A list item."),
+                  ),
+                  HorizontalRuleNode(
+                    id: "2",
+                    metadata: const {
+                      NodeMetadata.isDeletable: false,
+                    },
+                  ),
+                ],
+              ),
+            )
+            .autoFocus(true)
+            .pump();
+
+        // Select from the list item across the HR.
+        editContext.editor.execute([
+          const ChangeSelectionRequest(
+            DocumentSelection(
+              base: DocumentPosition(
+                nodeId: "1",
+                nodePosition: TextNodePosition(offset: 5),
+              ),
+              extent: DocumentPosition(
+                nodeId: "2",
+                nodePosition: UpstreamDownstreamNodePosition.downstream(),
+              ),
+            ),
+            SelectionChangeType.expandSelection,
+            SelectionReason.userInteraction,
+          ),
+        ]);
+        await tester.pump();
+
+        // Press enter to try to delete part of the list item and a non-deletable
+        // horizontal rule.
+        switch (debugDefaultTargetPlatformOverride) {
+          case TargetPlatform.android:
+          case TargetPlatform.iOS:
+            // FIXME: pressEnterWithIme should work, but it seems to think there are no
+            //        connected IME clients, so it fizzles. For now, we use the implementation
+            //        directly.
+            // await tester.pressEnterWithIme();
+            await tester.testTextInput.receiveAction(TextInputAction.newline);
+          case TargetPlatform.macOS:
+          case TargetPlatform.windows:
+          case TargetPlatform.linux:
+          case TargetPlatform.fuchsia:
+          case null:
+            await tester.pressEnter();
+        }
+
+        // Ensure nothing happened to the document.
+        final document = SuperEditorInspector.findDocument()!;
+        expect(document.nodeCount, 2);
+        expect(document.first.asTextNode.text.toPlainText(), "A list item.");
+        expect(document.last, isA<HorizontalRuleNode>());
+      });
+    });
+
     group('unordered list', () {
       testWidgetsOnDesktop('updates caret position when indenting', (tester) async {
         await _pumpOrderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemNode = doc.first as ListItemNode;
 
         // Place caret at the first list item, which has one level of indentation.
-        await tester.placeCaretInParagraph(listItemNode.id, 0);
+        await tester.placeCaretInParagraph(doc.first.id, 0);
 
         // Ensure the list item has first level of indentation.
-        expect(listItemNode.indent, 0);
+        expect(doc.first.asListItem.indent, 0);
 
         // Ensure the caret is initially positioned near the upstream edge of the first
         // character of the list item.
@@ -121,7 +239,7 @@ void main() {
         // exact caret positioning might change and we don't want that to break this test.
         final caretOffsetBeforeIndent = SuperEditorInspector.findCaretOffsetInDocument();
         final firstCharacterRectBeforeIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.first.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetBeforeIndent.dx, moreOrLessEquals(firstCharacterRectBeforeIndent.left, epsilon: 5));
 
@@ -129,7 +247,7 @@ void main() {
         await tester.pressTab();
 
         // Ensure the list item has second level of indentation.
-        expect(listItemNode.indent, 1);
+        expect(doc.first.asListItem.indent, 1);
 
         // Ensure that the caret's current offset is downstream from the initial caret offset,
         // and also that the current caret offset is roughly positioned near the upstream edge
@@ -140,7 +258,7 @@ void main() {
         final caretOffsetAfterIndent = SuperEditorInspector.findCaretOffsetInDocument();
         expect(caretOffsetAfterIndent.dx, greaterThan(caretOffsetBeforeIndent.dx));
         final firstCharacterRectAfterIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.first.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetAfterIndent.dx, moreOrLessEquals(firstCharacterRectAfterIndent.left, epsilon: 5));
       });
@@ -149,16 +267,15 @@ void main() {
         await _pumpUnorderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemNode = doc.last as ListItemNode;
 
         // Place caret at the last list item, which has two levels of indentation.
         // For some reason, taping at the first character isn't displaying any caret,
         // so we put the caret at the second character and then go back one position.
-        await tester.placeCaretInParagraph(listItemNode.id, 1);
+        await tester.placeCaretInParagraph(doc.last.id, 1);
         await tester.pressLeftArrow();
 
         // Ensure the list item has second level of indentation.
-        expect(listItemNode.indent, 1);
+        expect(doc.last.asListItem.indent, 1);
 
         // Ensure the caret is initially positioned near the upstream edge of the first
         // character of the list item.
@@ -167,7 +284,7 @@ void main() {
         // exact caret positioning might change and we don't want that to break this test.
         final caretOffsetBeforeUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
         final firstCharacterRectBeforeUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.last.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetBeforeUnIndent.dx, moreOrLessEquals(firstCharacterRectBeforeUnIndent.left, epsilon: 5));
 
@@ -175,7 +292,7 @@ void main() {
         await tester.pressBackspace();
 
         // Ensure the list item has first level of indentation.
-        expect(listItemNode.indent, 0);
+        expect(doc.last.asListItem.indent, 0);
 
         // Ensure that the caret's current offset is upstream from the initial caret offset,
         // and also that the current caret offset is roughly positioned near the upstream edge
@@ -186,7 +303,7 @@ void main() {
         final caretOffsetAfterUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
         expect(caretOffsetAfterUnIndent.dx, lessThan(caretOffsetBeforeUnIndent.dx));
         final firstCharacterRectAfterUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.last.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetAfterUnIndent.dx, moreOrLessEquals(firstCharacterRectAfterUnIndent.left, epsilon: 5));
       });
@@ -195,22 +312,39 @@ void main() {
         await _pumpUnorderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemNode = doc.last as ListItemNode;
 
         // Place caret at the last list item, which has two levels of indentation.
-        // For some reason, taping at the first character isn't displaying any caret,
+        // For some reason, tapping at the first character isn't displaying any caret,
         // so we put the caret at the second character and then go back one position.
-        await tester.placeCaretInParagraph(listItemNode.id, 1);
+        await tester.placeCaretInParagraph(doc.last.id, 1);
         await tester.pressLeftArrow();
 
         // Ensure the list item has second level of indentation.
-        expect(listItemNode.indent, 1);
+        expect(doc.last.asListItem.indent, 1);
 
         // Press SHIFT + TAB to trigger the list unindent command.
         await _pressShiftTab(tester);
 
         // Ensure the list item has first level of indentation.
-        expect(listItemNode.indent, 0);
+        expect(doc.last.asListItem.indent, 0);
+      });
+
+      testWidgetsOnDesktopAndWeb('unindents with BACKSPACE with caret at beginning of list item', (tester) async {
+        await _pumpUnorderedListWithTextField(tester);
+
+        final doc = SuperEditorInspector.findDocument()!;
+
+        // Place caret at the last list item, which has two levels of indentation.
+        await tester.placeCaretInParagraph(doc.last.id, 0);
+
+        // Ensure the list item has second level of indentation.
+        expect(doc.last.asListItem.indent, 1);
+
+        // Press BACKSPACE to trigger the list unindent command.
+        await tester.pressBackspace();
+
+        // Ensure the list item has first level of indentation.
+        expect(doc.last.asListItem.indent, 0);
       });
 
       testWidgetsOnAllPlatforms("inserts new item on ENTER at end of existing item", (tester) async {
@@ -243,11 +377,11 @@ void main() {
 
         // Ensure the existing item remains the same.
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "Item 12");
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 12");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "");
+        expect((document.last as ListItemNode).text.toPlainText(), "");
         expect((document.last as ListItemNode).type, ListItemType.unordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -291,11 +425,59 @@ void main() {
 
         // Ensure the existing item remains the same.
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "Item 12");
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 12");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "");
+        expect((document.last as ListItemNode).text.toPlainText(), "");
+        expect((document.last as ListItemNode).type, ListItemType.unordered);
+        expect((document.last as ListItemNode).indent, 0);
+        expect(
+          SuperEditorInspector.findDocumentSelection(),
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: document.last.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+        );
+      });
+
+      testWidgetsOnWebAndroid("inserts new item upon new line insertion at end of existing item", (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown('* Item 1')
+            .pump();
+
+        final document = context.findEditContext().document;
+
+        // Place the caret at the end of the list item.
+        await tester.placeCaretInParagraph(document.first.id, 6);
+
+        // Type at the end of the list item to generate a composing region,
+        // simulating the Samsung keyboard.
+        await tester.typeImeText('2');
+        await tester.ime.sendDeltas(const [
+          TextEditingDeltaNonTextUpdate(
+            oldText: '. Item 12',
+            selection: TextSelection.collapsed(offset: 9),
+            composing: TextRange.collapsed(9),
+          ),
+        ], getter: imeClientGetter);
+
+        // On Android Web, pressing ENTER generates both a "\n" insertion and a newline input action.
+        await tester.pressEnterWithIme(getter: imeClientGetter);
+
+        // Ensure that a new, empty list item was created.
+        expect(document.nodeCount, 2);
+
+        // Ensure the existing item remains the same.
+        expect(document.first, isA<ListItemNode>());
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 12");
+
+        // Ensure the new item has the correct list item type and indentation.
+        expect(document.last, isA<ListItemNode>());
+        expect((document.last as ListItemNode).text.toPlainText(), "");
         expect((document.last as ListItemNode).type, ListItemType.unordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -339,11 +521,11 @@ void main() {
 
         // Ensure the existing item remains the same.
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "Item 12");
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 12");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "");
+        expect((document.last as ListItemNode).text.toPlainText(), "");
         expect((document.last as ListItemNode).type, ListItemType.unordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -374,9 +556,9 @@ void main() {
         // Ensure that a new item was created with part of the previous item.
         expect(document.nodeCount, 2);
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "List ");
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "Item");
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
         expect((document.last as ListItemNode).type, ListItemType.unordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -408,9 +590,43 @@ void main() {
         // Ensure that a new item was created with part of the previous item.
         expect(document.nodeCount, 2);
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "List ");
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "Item");
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
+        expect((document.last as ListItemNode).type, ListItemType.unordered);
+        expect((document.last as ListItemNode).indent, 0);
+        expect(
+          SuperEditorInspector.findDocumentSelection(),
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: document.last.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+        );
+      });
+
+      testWidgetsOnWebAndroid("splits list item into two upon new line insertion in middle of existing item",
+          (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown('* List Item')
+            .pump();
+
+        final document = context.findEditContext().document;
+
+        // Place the caret at "List |Item"
+        await tester.placeCaretInParagraph(document.first.id, 5);
+
+        // On Android Web, pressing ENTER generates both a "\n" insertion and a newline input action.
+        await tester.pressEnterWithIme(getter: imeClientGetter);
+
+        // Ensure that a new item was created with part of the previous item.
+        expect(document.nodeCount, 2);
+        expect(document.first, isA<ListItemNode>());
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
+        expect(document.last, isA<ListItemNode>());
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
         expect((document.last as ListItemNode).type, ListItemType.unordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -442,9 +658,9 @@ void main() {
         // Ensure that a new item was created with part of the previous item.
         expect(document.nodeCount, 2);
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "List ");
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "Item");
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
         expect((document.last as ListItemNode).type, ListItemType.unordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -627,13 +843,12 @@ A paragraph
         await _pumpOrderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemNode = doc.first as ListItemNode;
 
         // Place caret at the first list item, which has one level of indentation.
-        await tester.placeCaretInParagraph(listItemNode.id, 0);
+        await tester.placeCaretInParagraph(doc.first.id, 0);
 
         // Ensure the list item has first level of indentation.
-        expect(listItemNode.indent, 0);
+        expect(doc.first.asListItem.indent, 0);
 
         // Ensure the caret is initially positioned near the upstream edge of the first
         // character of the list item.
@@ -642,7 +857,7 @@ A paragraph
         // exact caret positioning might change and we don't want that to break this test.
         final caretOffsetBeforeIndent = SuperEditorInspector.findCaretOffsetInDocument();
         final firstCharacterRectBeforeIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.first.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetBeforeIndent.dx, moreOrLessEquals(firstCharacterRectBeforeIndent.left, epsilon: 5));
 
@@ -650,7 +865,7 @@ A paragraph
         await tester.pressTab();
 
         // Ensure the list item has second level of indentation.
-        expect(listItemNode.indent, 1);
+        expect(doc.first.asListItem.indent, 1);
 
         // Ensure that the caret's current offset is downstream from the initial caret offset,
         // and also that the current caret offset is roughly positioned near the upstream edge
@@ -661,7 +876,7 @@ A paragraph
         final caretOffsetAfterIndent = SuperEditorInspector.findCaretOffsetInDocument();
         expect(caretOffsetAfterIndent.dx, greaterThan(caretOffsetBeforeIndent.dx));
         final firstCharacterRectAfterIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.first.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetAfterIndent.dx, moreOrLessEquals(firstCharacterRectAfterIndent.left, epsilon: 5));
       });
@@ -670,16 +885,15 @@ A paragraph
         await _pumpOrderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemNode = doc.last as ListItemNode;
 
         // Place caret at the last list item, which has two levels of indentation.
         // For some reason, taping at the first character isn't displaying any caret,
         // so we put the caret at the second character and then go back one position.
-        await tester.placeCaretInParagraph(listItemNode.id, 1);
+        await tester.placeCaretInParagraph(doc.last.id, 1);
         await tester.pressLeftArrow();
 
         // Ensure the list item has second level of indentation.
-        expect(listItemNode.indent, 1);
+        expect(doc.last.asListItem.indent, 1);
 
         // Ensure the caret is initially positioned near the upstream edge of the first
         // character of the list item.
@@ -688,7 +902,7 @@ A paragraph
         // exact caret positioning might change and we don't want that to break this test.
         final caretOffsetBeforeUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
         final firstCharacterRectBeforeUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.last.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetBeforeUnIndent.dx, moreOrLessEquals(firstCharacterRectBeforeUnIndent.left, epsilon: 5));
 
@@ -696,7 +910,7 @@ A paragraph
         await tester.pressBackspace();
 
         // Ensure the list item has first level of indentation.
-        expect(listItemNode.indent, 0);
+        expect(doc.last.asListItem.indent, 0);
 
         // Ensure that the caret's current offset is upstream from the initial caret offset,
         // and also that the current caret offset is roughly positioned near the upstream edge
@@ -707,7 +921,7 @@ A paragraph
         final caretOffsetAfterUnIndent = SuperEditorInspector.findCaretOffsetInDocument();
         expect(caretOffsetAfterUnIndent.dx, lessThan(caretOffsetBeforeUnIndent.dx));
         final firstCharacterRectAfterUnIndent = SuperEditorInspector.findDocumentLayout().getRectForPosition(
-          DocumentPosition(nodeId: listItemNode.id, nodePosition: const TextNodePosition(offset: 0)),
+          DocumentPosition(nodeId: doc.last.id, nodePosition: const TextNodePosition(offset: 0)),
         )!;
         expect(caretOffsetAfterUnIndent.dx, moreOrLessEquals(firstCharacterRectAfterUnIndent.left, epsilon: 5));
       });
@@ -716,22 +930,21 @@ A paragraph
         await _pumpOrderedListWithTextField(tester);
 
         final doc = SuperEditorInspector.findDocument()!;
-        final listItemNode = doc.last as ListItemNode;
 
         // Place caret at the last list item, which has two levels of indentation.
         // For some reason, taping at the first character isn't displaying any caret,
         // so we put the caret at the second character and then go back one position.
-        await tester.placeCaretInParagraph(listItemNode.id, 1);
+        await tester.placeCaretInParagraph(doc.last.id, 1);
         await tester.pressLeftArrow();
 
         // Ensure the list item has second level of indentation.
-        expect(listItemNode.indent, 1);
+        expect(doc.last.asListItem.indent, 1);
 
         // Press SHIFT + TAB to trigger the list unindent command.
         await _pressShiftTab(tester);
 
         // Ensure the list item has first level of indentation.
-        expect(listItemNode.indent, 0);
+        expect(doc.last.asListItem.indent, 0);
       });
 
       testWidgetsOnAllPlatforms("inserts new item on ENTER at end of existing item", (tester) async {
@@ -753,11 +966,11 @@ A paragraph
 
         // Ensure the existing item remains the same.
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "Item 1");
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 1");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "");
+        expect((document.last as ListItemNode).text.toPlainText(), "");
         expect((document.last as ListItemNode).type, ListItemType.ordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -790,11 +1003,48 @@ A paragraph
 
         // Ensure the existing item remains the same.
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "Item 1");
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 1");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "");
+        expect((document.last as ListItemNode).text.toPlainText(), "");
+        expect((document.last as ListItemNode).type, ListItemType.ordered);
+        expect((document.last as ListItemNode).indent, 0);
+        expect(
+          SuperEditorInspector.findDocumentSelection(),
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: document.last.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+        );
+      });
+
+      testWidgetsOnWebAndroid("inserts new item upon new line insertion at end of existing item", (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown('1. Item 1')
+            .pump();
+
+        final document = context.findEditContext().document;
+
+        // Place the caret at the end of the list item.
+        await tester.placeCaretInParagraph(document.first.id, 6);
+
+        // On Android Web, pressing ENTER generates both a "\n" insertion and a newline input action.
+        await tester.pressEnterWithIme(getter: imeClientGetter);
+
+        // Ensure that a new, empty list item was created.
+        expect(document.nodeCount, 2);
+
+        // Ensure the existing item remains the same.
+        expect(document.first, isA<ListItemNode>());
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 1");
+
+        // Ensure the new item has the correct list item type and indentation.
+        expect(document.last, isA<ListItemNode>());
+        expect((document.last as ListItemNode).text.toPlainText(), "");
         expect((document.last as ListItemNode).type, ListItemType.ordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -827,11 +1077,11 @@ A paragraph
 
         // Ensure the existing item remains the same.
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "Item 1");
+        expect((document.first as ListItemNode).text.toPlainText(), "Item 1");
 
         // Ensure the new item has the correct list item type and indentation.
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "");
+        expect((document.last as ListItemNode).text.toPlainText(), "");
         expect((document.last as ListItemNode).type, ListItemType.ordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -862,9 +1112,9 @@ A paragraph
         // Ensure that a new item was created with part of the previous item.
         expect(document.nodeCount, 2);
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "List ");
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "Item");
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
         expect((document.last as ListItemNode).type, ListItemType.ordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -896,9 +1146,43 @@ A paragraph
         // Ensure that a new item was created with part of the previous item.
         expect(document.nodeCount, 2);
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "List ");
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "Item");
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
+        expect((document.last as ListItemNode).type, ListItemType.ordered);
+        expect((document.last as ListItemNode).indent, 0);
+        expect(
+          SuperEditorInspector.findDocumentSelection(),
+          DocumentSelection.collapsed(
+            position: DocumentPosition(
+              nodeId: document.last.id,
+              nodePosition: const TextNodePosition(offset: 0),
+            ),
+          ),
+        );
+      });
+
+      testWidgetsOnWebAndroid("splits list item into two upon new line insertion in middle of existing item",
+          (tester) async {
+        final context = await tester //
+            .createDocument()
+            .fromMarkdown('1. List Item')
+            .pump();
+
+        final document = context.findEditContext().document;
+
+        // Place the caret at "List |Item"
+        await tester.placeCaretInParagraph(document.first.id, 5);
+
+        // On Android Web, pressing ENTER generates both a "\n" insertion and a newline input action.
+        await tester.pressEnterWithIme(getter: imeClientGetter);
+
+        // Ensure that a new item was created with part of the previous item.
+        expect(document.nodeCount, 2);
+        expect(document.first, isA<ListItemNode>());
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
+        expect(document.last, isA<ListItemNode>());
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
         expect((document.last as ListItemNode).type, ListItemType.ordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(
@@ -930,9 +1214,9 @@ A paragraph
         // Ensure that a new item was created with part of the previous item.
         expect(document.nodeCount, 2);
         expect(document.first, isA<ListItemNode>());
-        expect((document.first as ListItemNode).text.text, "List ");
+        expect((document.first as ListItemNode).text.toPlainText(), "List ");
         expect(document.last, isA<ListItemNode>());
-        expect((document.last as ListItemNode).text.text, "Item");
+        expect((document.last as ListItemNode).text.toPlainText(), "Item");
         expect((document.last as ListItemNode).type, ListItemType.ordered);
         expect((document.last as ListItemNode).indent, 0);
         expect(

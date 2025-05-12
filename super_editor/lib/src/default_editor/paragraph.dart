@@ -25,33 +25,66 @@ import 'package:super_text_layout/super_text_layout.dart';
 import 'layout_single_column/layout_single_column.dart';
 import 'text_tools.dart';
 
+@immutable
 class ParagraphNode extends TextNode {
   ParagraphNode({
-    required String id,
-    required AttributedText text,
-    int indent = 0,
-    Map<String, dynamic>? metadata,
-  })  : _indent = indent,
-        super(
-          id: id,
-          text: text,
-          metadata: metadata,
-        ) {
+    required super.id,
+    required super.text,
+    this.indent = 0,
+    super.metadata,
+  }) {
     if (getMetadataValue("blockType") == null) {
-      putMetadataValue("blockType", paragraphAttribution);
+      initAddToMetadata({
+        "blockType": paragraphAttribution,
+      });
     }
   }
 
   /// The indent level of this paragraph - `0` is no indent.
-  int get indent => _indent;
-  int _indent;
-  set indent(int newValue) {
-    if (newValue == _indent) {
-      return;
-    }
+  final int indent;
 
-    _indent = newValue;
-    notifyListeners();
+  ParagraphNode copyParagraphWith({
+    String? id,
+    AttributedText? text,
+    int? indent,
+    Map<String, dynamic>? metadata,
+  }) {
+    return ParagraphNode(
+      id: id ?? this.id,
+      text: text ?? this.text,
+      indent: indent ?? this.indent,
+      metadata: metadata ?? this.metadata,
+    );
+  }
+
+  @override
+  ParagraphNode copyTextNodeWith({
+    String? id,
+    AttributedText? text,
+    Map<String, dynamic>? metadata,
+  }) {
+    return copyParagraphWith(
+      id: id,
+      text: text,
+      metadata: metadata,
+    );
+  }
+
+  @override
+  ParagraphNode copyAndReplaceMetadata(Map<String, dynamic> newMetadata) {
+    return copyParagraphWith(
+      metadata: newMetadata,
+    );
+  }
+
+  @override
+  ParagraphNode copyWithAddedMetadata(Map<String, dynamic> newProperties) {
+    return copyParagraphWith(
+      metadata: {
+        ...metadata,
+        ...newProperties,
+      },
+    );
   }
 
   @override
@@ -62,10 +95,10 @@ class ParagraphNode extends TextNode {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      super == other && other is ParagraphNode && runtimeType == other.runtimeType && _indent == other._indent;
+      super == other && other is ParagraphNode && runtimeType == other.runtimeType && indent == other.indent;
 
   @override
-  int get hashCode => super.hashCode ^ _indent.hashCode;
+  int get hashCode => super.hashCode ^ indent.hashCode;
 }
 
 class ParagraphComponentBuilder implements ComponentBuilder {
@@ -77,7 +110,7 @@ class ParagraphComponentBuilder implements ComponentBuilder {
       return null;
     }
 
-    final textDirection = getParagraphDirection(node.text.text);
+    final textDirection = getParagraphDirection(node.text.toPlainText());
 
     TextAlign textAlign = (textDirection == TextDirection.ltr) ? TextAlign.left : TextAlign.right;
     final textAlignName = node.getMetadataValue('textAlign');
@@ -110,7 +143,7 @@ class ParagraphComponentBuilder implements ComponentBuilder {
   }
 
   @override
-  ParagraphComponent? createComponent(
+  Widget? createComponent(
       SingleColumnDocumentComponentContext componentContext, SingleColumnLayoutComponentViewModel componentViewModel) {
     if (componentViewModel is! ParagraphComponentViewModel) {
       return null;
@@ -143,6 +176,7 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
     this.indentCalculator = defaultParagraphIndentCalculator,
     required this.text,
     required this.textStyleBuilder,
+    this.inlineWidgetBuilders = const [],
     this.textDirection = TextDirection.ltr,
     this.textAlignment = TextAlign.left,
     this.textScaler,
@@ -176,6 +210,8 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
   @override
   AttributionStyleBuilder textStyleBuilder;
   @override
+  InlineWidgetBuilderChain inlineWidgetBuilders;
+  @override
   TextDirection textDirection;
   @override
   TextAlign textAlignment;
@@ -203,6 +239,7 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       indentCalculator: indentCalculator,
       text: text,
       textStyleBuilder: textStyleBuilder,
+      inlineWidgetBuilders: inlineWidgetBuilders,
       textDirection: textDirection,
       textAlignment: textAlignment,
       textScaler: textScaler,
@@ -262,6 +299,186 @@ class ParagraphComponentViewModel extends SingleColumnLayoutComponentViewModel w
       showComposingRegionUnderline.hashCode;
 }
 
+/// A [ComponentBuilder] for rendering hint text in the first node of a document,
+/// when its an empty text node.
+class HintComponentBuilder extends ParagraphComponentBuilder {
+  const HintComponentBuilder(
+    this.hint,
+    this.hintStyleBuilder,
+  );
+
+  final String hint;
+  final TextStyle Function(BuildContext) hintStyleBuilder;
+
+  @override
+  SingleColumnLayoutComponentViewModel? createViewModel(
+    Document document,
+    DocumentNode node,
+  ) {
+    if (node is! ParagraphNode) {
+      return null;
+    }
+
+    final nodeIndex = document.getNodeIndexById(
+      node.id,
+    );
+
+    if (nodeIndex > 0) {
+      // This isn't the first node, we don't ever want to show hint text.
+      return null;
+    }
+
+    if (document.length > 1) {
+      // There are more than one nodes in the document, we don't want to show
+      // hint text.
+      return null;
+    }
+
+    return HintComponentViewModel.fromParagraphViewModel(
+      super.createViewModel(document, node)! as ParagraphComponentViewModel,
+      hintText: hint,
+    );
+  }
+
+  @override
+  Widget? createComponent(
+    SingleColumnDocumentComponentContext componentContext,
+    SingleColumnLayoutComponentViewModel componentViewModel,
+  ) {
+    if (componentViewModel is! HintComponentViewModel) {
+      return null;
+    }
+
+    return TextWithHintComponent(
+      key: componentContext.componentKey,
+      text: componentViewModel.text,
+      textStyleBuilder: componentViewModel.textStyleBuilder,
+      hintText: AttributedText(componentViewModel.hintText),
+      hintStyleBuilder: (attributions) => hintStyleBuilder(componentContext.context),
+      textSelection: componentViewModel.selection,
+      selectionColor: componentViewModel.selectionColor,
+      underlines: componentViewModel.createUnderlines(),
+      metadata: {
+        if (componentViewModel.blockType != null) //
+          'blockType': componentViewModel.blockType,
+      },
+    );
+  }
+}
+
+class HintComponentViewModel extends SingleColumnLayoutComponentViewModel with TextComponentViewModel {
+  factory HintComponentViewModel.fromParagraphViewModel(
+    ParagraphComponentViewModel viewModel, {
+    required String hintText,
+  }) {
+    return HintComponentViewModel(
+      nodeId: viewModel.nodeId,
+      maxWidth: viewModel.maxWidth,
+      padding: viewModel.padding,
+      blockType: viewModel.blockType,
+      text: viewModel.text,
+      hintText: hintText,
+      inlineWidgetBuilders: viewModel.inlineWidgetBuilders,
+      textAlignment: viewModel.textAlignment,
+      textDirection: viewModel.textDirection,
+      textStyleBuilder: viewModel.textStyleBuilder,
+      selectionColor: viewModel.selectionColor,
+      indent: viewModel.indent,
+      selection: viewModel.selection,
+      highlightWhenEmpty: viewModel.highlightWhenEmpty,
+    );
+  }
+
+  HintComponentViewModel({
+    required super.nodeId,
+    super.maxWidth,
+    required super.padding,
+    this.blockType,
+    required this.text,
+    required this.hintText,
+    this.inlineWidgetBuilders = const [],
+    this.textAlignment = TextAlign.left,
+    this.textDirection = TextDirection.ltr,
+    required this.textStyleBuilder,
+    required this.selectionColor,
+    this.indent = 0,
+    this.selection,
+    this.highlightWhenEmpty = false,
+  });
+
+  String hintText;
+
+  Attribution? blockType;
+
+  @override
+  AttributedText text;
+  @override
+  AttributionStyleBuilder textStyleBuilder;
+  @override
+  InlineWidgetBuilderChain inlineWidgetBuilders;
+  @override
+  TextDirection textDirection;
+  @override
+  TextAlign textAlignment;
+  int indent;
+  @override
+  TextSelection? selection;
+  @override
+  Color selectionColor;
+  @override
+  bool highlightWhenEmpty;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
+  @override
+  HintComponentViewModel copy() {
+    return HintComponentViewModel(
+      nodeId: nodeId,
+      maxWidth: maxWidth,
+      padding: padding,
+      text: text,
+      textStyleBuilder: textStyleBuilder,
+      textDirection: textDirection,
+      inlineWidgetBuilders: inlineWidgetBuilders,
+      indent: indent,
+      selection: selection,
+      selectionColor: selectionColor,
+      highlightWhenEmpty: highlightWhenEmpty,
+      hintText: hintText,
+    );
+  }
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      super == other &&
+          other is HintComponentViewModel &&
+          runtimeType == other.runtimeType &&
+          text == other.text &&
+          hintText == other.hintText &&
+          textDirection == other.textDirection &&
+          textAlignment == other.textAlignment &&
+          indent == other.indent &&
+          selection == other.selection &&
+          selectionColor == other.selectionColor &&
+          highlightWhenEmpty == other.highlightWhenEmpty;
+
+  @override
+  // ignore: avoid_equals_and_hash_code_on_mutable_classes
+  int get hashCode =>
+      super.hashCode ^
+      text.hashCode ^
+      hintText.hashCode ^
+      textDirection.hashCode ^
+      textAlignment.hashCode ^
+      indent.hashCode ^
+      selection.hashCode ^
+      selectionColor.hashCode ^
+      highlightWhenEmpty.hashCode;
+}
+
 /// The standard [TextBlockIndentCalculator] used by paragraphs in `SuperEditor`.
 double defaultParagraphIndentCalculator(TextStyle textStyle, int indent) {
   return ((textStyle.fontSize ?? 16) * 0.60) * 4 * indent;
@@ -294,37 +511,42 @@ class _ParagraphComponentState extends State<ParagraphComponent>
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Indent spacing on left.
-        SizedBox(
-          width: widget.viewModel.indentCalculator(
-            widget.viewModel.textStyleBuilder({}),
-            widget.viewModel.indent,
+    return Directionality(
+      textDirection: widget.viewModel.textDirection,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Indent spacing on left.
+          SizedBox(
+            width: widget.viewModel.indentCalculator(
+              widget.viewModel.textStyleBuilder({}),
+              widget.viewModel.indent,
+            ),
           ),
-        ),
-        // The actual paragraph UI.
-        Expanded(
-          child: TextComponent(
-            key: _textKey,
-            text: widget.viewModel.text,
-            textAlign: widget.viewModel.textAlignment,
-            textScaler: widget.viewModel.textScaler,
-            textStyleBuilder: widget.viewModel.textStyleBuilder,
-            metadata: widget.viewModel.blockType != null
-                ? {
-                    'blockType': widget.viewModel.blockType,
-                  }
-                : {},
-            textSelection: widget.viewModel.selection,
-            selectionColor: widget.viewModel.selectionColor,
-            highlightWhenEmpty: widget.viewModel.highlightWhenEmpty,
-            underlines: widget.viewModel.createUnderlines(),
-            showDebugPaint: widget.showDebugPaint,
+          // The actual paragraph UI.
+          Expanded(
+            child: TextComponent(
+              key: _textKey,
+              text: widget.viewModel.text,
+              textDirection: widget.viewModel.textDirection,
+              textAlign: widget.viewModel.textAlignment,
+              textScaler: widget.viewModel.textScaler,
+              textStyleBuilder: widget.viewModel.textStyleBuilder,
+              inlineWidgetBuilders: widget.viewModel.inlineWidgetBuilders,
+              metadata: widget.viewModel.blockType != null
+                  ? {
+                      'blockType': widget.viewModel.blockType,
+                    }
+                  : {},
+              textSelection: widget.viewModel.selection,
+              selectionColor: widget.viewModel.selectionColor,
+              highlightWhenEmpty: widget.viewModel.highlightWhenEmpty,
+              underlines: widget.viewModel.createUnderlines(),
+              showDebugPaint: widget.showDebugPaint,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -385,7 +607,16 @@ class ChangeParagraphAlignmentCommand extends EditCommand {
         alignmentName = 'justify';
         break;
     }
-    existingNode.putMetadataValue('textAlign', alignmentName);
+
+    document.replaceNodeById(
+      existingNode.id,
+      existingNode.copyParagraphWith(
+        metadata: {
+          ...existingNode.metadata,
+          "textAlign": alignmentName,
+        },
+      ),
+    );
 
     executor.logChanges([
       DocumentEdit(
@@ -433,7 +664,15 @@ class ChangeParagraphBlockTypeCommand extends EditCommand {
     final document = context.document;
 
     final existingNode = document.getNodeById(nodeId)! as ParagraphNode;
-    existingNode.putMetadataValue('blockType', blockType);
+    document.replaceNodeById(
+      existingNode.id,
+      existingNode.copyParagraphWith(
+        metadata: {
+          ...existingNode.metadata,
+          "blockType": blockType,
+        },
+      ),
+    );
 
     executor.logChanges([
       DocumentEdit(
@@ -517,8 +756,7 @@ class CombineParagraphsCommand extends EditCommand {
     }
 
     // Combine the text and delete the currently selected node.
-    final isTopNodeEmpty = nodeAbove.text.text.isEmpty;
-    nodeAbove.text = nodeAbove.text.copyAndAppend(secondNode.text);
+    final isTopNodeEmpty = nodeAbove.text.isEmpty;
 
     // Avoid overriding the metadata when the nodeAbove isn't a ParagraphNode.
     //
@@ -528,9 +766,23 @@ class CombineParagraphsCommand extends EditCommand {
     if (isTopNodeEmpty && nodeAbove is ParagraphNode) {
       // If the top node was empty, we want to retain everything in the
       // bottom node, including the block attribution and styles.
-      nodeAbove.metadata = secondNode.metadata;
+      document.replaceNodeById(
+        nodeAbove.id,
+        nodeAbove.copyTextNodeWith(
+          text: nodeAbove.text.copyAndAppend(secondNode.text),
+          metadata: secondNode.metadata,
+        ),
+      );
+    } else {
+      document.replaceNodeById(
+        nodeAbove.id,
+        nodeAbove.copyTextNodeWith(
+          text: nodeAbove.text.copyAndAppend(secondNode.text),
+        ),
+      );
     }
-    bool didRemove = document.deleteNode(secondNode);
+
+    bool didRemove = document.deleteNode(secondNode.id);
     if (!didRemove) {
       editorDocLog.info('ERROR: Failed to delete the currently selected node from the document.');
     }
@@ -619,8 +871,8 @@ class SplitParagraphCommand extends EditCommand {
     final startText = text.copyText(0, splitPosition.offset);
     final endText = text.copyText(splitPosition.offset);
     editorDocLog.info('Splitting paragraph:');
-    editorDocLog.info(' - start text: "${startText.text}"');
-    editorDocLog.info(' - end text: "${endText.text}"');
+    editorDocLog.info(' - start text: "${startText.toPlainText()}"');
+    editorDocLog.info(' - end text: "${endText.toPlainText()}"');
 
     if (splitPosition.offset == text.length) {
       // The paragraph was split at the very end, the user is creating a new,
@@ -647,7 +899,11 @@ class SplitParagraphCommand extends EditCommand {
 
     // Change the current nodes content to just the text before the caret.
     editorDocLog.info(' - changing the original paragraph text due to split');
-    node.text = startText;
+    final updatedNode = node.copyParagraphWith(text: startText);
+    document.replaceNodeById(
+      node.id,
+      updatedNode,
+    );
 
     // Create a new node that will follow the current node. Set its text
     // to the text that was removed from the current node. And create a
@@ -662,7 +918,7 @@ class SplitParagraphCommand extends EditCommand {
     // Insert the new node after the current node.
     editorDocLog.info(' - inserting new node in document');
     document.insertNodeAfter(
-      existingNode: node,
+      existingNodeId: updatedNode.id,
       newNode: newNode,
     );
 
@@ -701,7 +957,7 @@ class SplitParagraphCommand extends EditCommand {
       ),
     ];
 
-    if (newNode.text.text.isEmpty) {
+    if (newNode.text.isEmpty) {
       executor.logChanges([
         SubmitParagraphIntention.start(),
         ...documentChanges,
@@ -778,7 +1034,7 @@ class DeleteUpstreamAtBeginningOfParagraphCommand extends EditCommand {
 
     moveSelectionToEndOfPrecedingNode(executor, document, composer);
 
-    if ((node as TextNode).text.text.isEmpty) {
+    if ((node as TextNode).text.isEmpty) {
       // The caret is at the beginning of an empty TextNode and the preceding
       // node is not a TextNode. Delete the current TextNode and move the
       // selection up to the preceding node if exist.
@@ -959,7 +1215,7 @@ class DeleteParagraphCommand extends EditCommand {
       return;
     }
 
-    bool didRemove = document.deleteNode(node);
+    bool didRemove = document.deleteNode(node.id);
     if (!didRemove) {
       editorDocLog.shout('ERROR: Failed to delete node "$node" from the document.');
     }
@@ -1040,7 +1296,7 @@ ExecutionInstruction enterToUnIndentParagraph({
     // Nothing to un-indent.
     return ExecutionInstruction.continueExecution;
   }
-  if (paragraph.text.text.isNotEmpty) {
+  if (paragraph.text.isNotEmpty) {
     // We only un-indent when the user presses Enter in an empty paragraph.
     return ExecutionInstruction.continueExecution;
   }
@@ -1065,9 +1321,11 @@ ExecutionInstruction enterToInsertBlockNewline({
     return ExecutionInstruction.continueExecution;
   }
 
-  final didInsertBlockNewline = editContext.commonOps.insertBlockLevelNewline();
+  editContext.editor.execute([
+    InsertNewlineAtCaretRequest(Editor.createNodeId()),
+  ]);
 
-  return didInsertBlockNewline ? ExecutionInstruction.haltExecution : ExecutionInstruction.continueExecution;
+  return ExecutionInstruction.haltExecution;
 }
 
 ExecutionInstruction tabToIndentParagraph({
@@ -1140,7 +1398,12 @@ class SetParagraphIndentCommand extends EditCommand {
     }
 
     // Decrease the paragraph indentation of the desired paragraph.
-    paragraph.indent = level;
+    document.replaceNodeById(
+      paragraph.id,
+      paragraph.copyParagraphWith(
+        indent: level,
+      ),
+    );
 
     // Log all changes.
     executor.logChanges([
@@ -1173,7 +1436,10 @@ class IndentParagraphCommand extends EditCommand {
     }
 
     // Increase the paragraph indentation.
-    paragraph.indent += 1;
+    document.replaceNodeById(
+      paragraph.id,
+      paragraph.copyParagraphWith(indent: paragraph.indent + 1),
+    );
 
     executor.logChanges([
       DocumentEdit(
@@ -1253,7 +1519,10 @@ class UnIndentParagraphCommand extends EditCommand {
     }
 
     // Decrease the paragraph indentation of the desired paragraph.
-    paragraph.indent -= 1;
+    document.replaceNodeById(
+      paragraph.id,
+      paragraph.copyParagraphWith(indent: paragraph.indent - 1),
+    );
 
     // Log all changes.
     executor.logChanges([
@@ -1327,11 +1596,11 @@ ExecutionInstruction moveParagraphSelectionUpWhenBackspaceIsPressed({
     return ExecutionInstruction.continueExecution;
   }
 
-  if (node.text.text.isEmpty) {
+  if (node.text.isEmpty) {
     return ExecutionInstruction.continueExecution;
   }
 
-  final nodeAbove = editContext.document.getNodeBefore(node);
+  final nodeAbove = editContext.document.getNodeBeforeById(node.id);
   if (nodeAbove == null) {
     return ExecutionInstruction.continueExecution;
   }

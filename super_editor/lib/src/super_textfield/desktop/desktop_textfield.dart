@@ -7,9 +7,11 @@ import 'package:flutter/material.dart' hide SelectableText;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/core/document_layout.dart';
+import 'package:super_editor/src/default_editor/text_tools.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 import 'package:super_editor/src/infrastructure/actions.dart';
 import 'package:super_editor/src/infrastructure/attributed_text_styles.dart';
+import 'package:super_editor/src/infrastructure/document_gestures_interaction_overrides.dart';
 import 'package:super_editor/src/infrastructure/flutter/build_context.dart';
 import 'package:super_editor/src/infrastructure/flutter/flutter_scheduler.dart';
 import 'package:super_editor/src/infrastructure/flutter/material_scrollbar.dart';
@@ -49,6 +51,7 @@ class SuperDesktopTextField extends StatefulWidget {
     this.tapRegionGroupId,
     this.textController,
     this.textStyleBuilder = defaultTextFieldStyleBuilder,
+    this.inlineWidgetBuilders = const [],
     this.textAlign = TextAlign.left,
     this.hintBehavior = HintBehavior.displayHintUntilFocus,
     this.hintBuilder,
@@ -71,6 +74,7 @@ class SuperDesktopTextField extends StatefulWidget {
     this.imeConfiguration,
     this.showComposingUnderline,
     this.selectorHandlers,
+    this.tapHandlers = const [],
     List<TextFieldKeyboardHandler>? keyboardHandlers,
   })  : keyboardHandlers = keyboardHandlers ??
             (inputSource == TextInputSource.keyboard
@@ -89,6 +93,9 @@ class SuperDesktopTextField extends StatefulWidget {
   /// [textController] based on the attributions in that content.
   final AttributionStyleBuilder textStyleBuilder;
 
+  /// {@macro super_text_field_inline_widget_builders}
+  final InlineWidgetBuilderChain inlineWidgetBuilders;
+
   /// Policy for when the hint should be displayed.
   final HintBehavior hintBehavior;
 
@@ -98,7 +105,10 @@ class SuperDesktopTextField extends StatefulWidget {
   final WidgetBuilder? hintBuilder;
 
   /// The alignment to use for text in this text field.
-  final TextAlign textAlign;
+  ///
+  /// If `null`, the text alignment is determined by the text direction
+  /// of the content.
+  final TextAlign? textAlign;
 
   /// The visual representation of the user's selection highlight.
   final SelectionHighlightStyle selectionHighlightStyle;
@@ -118,6 +128,7 @@ class SuperDesktopTextField extends StatefulWidget {
 
   final DecorationBuilder? decorationBuilder;
 
+  @Deprecated('Use tapHandlers instead')
   final RightClickListener? onRightClick;
 
   /// The [SuperDesktopTextField] input source, e.g., keyboard or Input Method Engine.
@@ -136,6 +147,9 @@ class SuperDesktopTextField extends StatefulWidget {
   /// The IME reports selectors as unique `String`s, therefore selector handlers are
   /// defined as a mapping from selector names to handler functions.
   final Map<String, SuperTextFieldSelectorHandler>? selectorHandlers;
+
+  /// {@macro super_text_field_tap_handlers}
+  final List<SuperTextFieldTapHandler> tapHandlers;
 
   /// The type of action associated with ENTER key.
   ///
@@ -162,6 +176,22 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
 
   late SuperTextFieldContext _textFieldContext;
   late ImeAttributedTextEditingController _controller;
+
+  /// The text direction of the first character in the text.
+  ///
+  /// Used to align and position the caret depending on whether
+  /// the text is RTL or LTR.
+  TextDirection? _contentTextDirection;
+
+  /// The text direction applied to the inner text.
+  TextDirection get _textDirection => _contentTextDirection ?? TextDirection.ltr;
+
+  TextAlign get _textAlign =>
+      widget.textAlign ??
+      ((_textDirection == TextDirection.ltr) //
+          ? TextAlign.left
+          : TextAlign.right);
+
   late ScrollController _scrollController;
   late TextFieldScroller _textFieldScroller;
 
@@ -190,6 +220,8 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
 
     // Check if we need to update the selection.
     _updateSelectionAndComposingRegionOnFocusChange();
+
+    _contentTextDirection = getParagraphDirection(_controller.text.toPlainText());
   }
 
   @override
@@ -308,6 +340,12 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
     // so that any pending visual content changes can happen before
     // attempting to calculate the visual position of the selection extent.
     onNextFrame((_) => _updateViewportHeight());
+
+    // Even though we calling `onNextFrame`, it doesn't necessarily mean
+    // a new frame will be scheduled. Call setState to ensure the text direction is updated.
+    setState(() {
+      _contentTextDirection = getParagraphDirection(_controller.text.toPlainText());
+    });
   }
 
   /// Returns true if the viewport height changed, false otherwise.
@@ -337,7 +375,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
   }
 
   int _getEstimatedLinesOfText() {
-    if (_controller.text.text.isEmpty) {
+    if (_controller.text.isEmpty) {
       return 0;
     }
 
@@ -348,7 +386,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
     final offsetAtEndOfText = textLayout.getOffsetAtPosition(TextPosition(offset: _controller.text.length));
     int lineCount = (offsetAtEndOfText.dy / _getEstimatedLineHeight()).ceil();
 
-    if (_controller.text.text.endsWith('\n')) {
+    if (_controller.text.toPlainText().endsWith('\n')) {
       lineCount += 1;
     }
 
@@ -364,7 +402,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
     // We don't expect getHeightForCaret to ever return null, but since its return type is nullable,
     // we use getLineHeightAtPosition as a backup.
     // More information in https://github.com/flutter/flutter/issues/145507.
-    final lineHeight = _controller.text.text.isEmpty || textLayout == null
+    final lineHeight = _controller.text.isEmpty || textLayout == null
         ? 0.0
         : textLayout.getHeightForCaret(const TextPosition(offset: 0)) ??
             textLayout.getLineHeightAtPosition(const TextPosition(offset: 0));
@@ -413,6 +451,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
             textScrollKey: _textScrollKey,
             isMultiline: isMultiline,
             onRightClick: widget.onRightClick,
+            tapHandlers: widget.tapHandlers,
             child: MultiListenableBuilder(
               listenables: {
                 _focusNode,
@@ -424,7 +463,7 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
                     key: _textScrollKey,
                     textKey: _textKey,
                     textController: _controller,
-                    textAlign: widget.textAlign,
+                    textAlign: _textAlign,
                     scrollController: _scrollController,
                     viewportHeight: _viewportHeight,
                     estimatedLineHeight: _getEstimatedLineHeight(),
@@ -486,60 +525,64 @@ class SuperDesktopTextFieldState extends State<SuperDesktopTextField> implements
   }
 
   Widget _buildSelectableText() {
-    return SuperText(
-      key: _textKey,
-      richText: _controller.text.computeTextSpan(widget.textStyleBuilder),
-      textAlign: widget.textAlign,
-      textScaler: _textScaler,
-      layerBeneathBuilder: (context, textLayout) {
-        final isTextEmpty = _controller.text.text.isEmpty;
-        final showHint = widget.hintBuilder != null &&
-            ((isTextEmpty && widget.hintBehavior == HintBehavior.displayHintUntilTextEntered) ||
-                (isTextEmpty && !_focusNode.hasFocus && widget.hintBehavior == HintBehavior.displayHintUntilFocus));
+    return Directionality(
+      textDirection: _textDirection,
+      child: SuperText(
+        key: _textKey,
+        richText: _controller.text.computeInlineSpan(context, widget.textStyleBuilder, widget.inlineWidgetBuilders),
+        textAlign: _textAlign,
+        textDirection: _textDirection,
+        textScaler: _textScaler,
+        layerBeneathBuilder: (context, textLayout) {
+          final isTextEmpty = _controller.text.isEmpty;
+          final showHint = widget.hintBuilder != null &&
+              ((isTextEmpty && widget.hintBehavior == HintBehavior.displayHintUntilTextEntered) ||
+                  (isTextEmpty && !_focusNode.hasFocus && widget.hintBehavior == HintBehavior.displayHintUntilFocus));
 
-        return Stack(
-          children: [
-            if (widget.textController?.selection.isValid == true)
-              // Selection highlight beneath the text.
-              TextLayoutSelectionHighlight(
-                textLayout: textLayout,
-                style: widget.selectionHighlightStyle,
-                selection: widget.textController?.selection,
-              ),
-            // Underline beneath the composing region.
-            if (widget.textController?.composingRegion.isValid == true && _shouldShowComposingUnderline)
-              TextUnderlineLayer(
-                textLayout: textLayout,
-                style: StraightUnderlineStyle(
-                  color: widget.textStyleBuilder({}).color ?? //
-                      (Theme.of(context).brightness == Brightness.light ? Colors.black : Colors.white),
+          return Stack(
+            children: [
+              if (widget.textController?.selection.isValid == true)
+                // Selection highlight beneath the text.
+                TextLayoutSelectionHighlight(
+                  textLayout: textLayout,
+                  style: widget.selectionHighlightStyle,
+                  selection: widget.textController?.selection,
                 ),
-                underlines: [
-                  TextLayoutUnderline(
-                    range: widget.textController!.composingRegion,
+              // Underline beneath the composing region.
+              if (widget.textController?.composingRegion.isValid == true && _shouldShowComposingUnderline)
+                TextUnderlineLayer(
+                  textLayout: textLayout,
+                  style: StraightUnderlineStyle(
+                    color: widget.textStyleBuilder({}).color ?? //
+                        (Theme.of(context).brightness == Brightness.light ? Colors.black : Colors.white),
                   ),
-                ],
-              ),
-            if (showHint) //
-              Align(
-                alignment: Alignment.centerLeft,
-                child: widget.hintBuilder!(context),
-              ),
-          ],
-        );
-      },
-      layerAboveBuilder: (context, textLayout) {
-        if (!_focusNode.hasFocus) {
-          return const SizedBox();
-        }
+                  underlines: [
+                    TextLayoutUnderline(
+                      range: widget.textController!.composingRegion,
+                    ),
+                  ],
+                ),
+              if (showHint) //
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: widget.hintBuilder!(context),
+                ),
+            ],
+          );
+        },
+        layerAboveBuilder: (context, textLayout) {
+          if (!_focusNode.hasFocus) {
+            return const SizedBox();
+          }
 
-        return TextLayoutCaret(
-          textLayout: textLayout,
-          style: widget.caretStyle,
-          position: _controller.selection.extent,
-          blinkTimingMode: widget.blinkTimingMode,
-        );
-      },
+          return TextLayoutCaret(
+            textLayout: textLayout,
+            style: widget.caretStyle,
+            position: _controller.selection.extent,
+            blinkTimingMode: widget.blinkTimingMode,
+          );
+        },
+      ),
     );
   }
 }
@@ -568,6 +611,7 @@ class SuperTextFieldGestureInteractor extends StatefulWidget {
     required this.textScrollKey,
     required this.isMultiline,
     this.onRightClick,
+    this.tapHandlers = const [],
     required this.child,
   }) : super(key: key);
 
@@ -590,7 +634,11 @@ class SuperTextFieldGestureInteractor extends StatefulWidget {
   final bool isMultiline;
 
   /// Callback invoked when the user right clicks on this text field.
+  @Deprecated('Use tapHandlers instead')
   final RightClickListener? onRightClick;
+
+  /// {@macro super_text_field_tap_handlers}
+  final List<SuperTextFieldTapHandler> tapHandlers;
 
   /// The rest of the subtree for this text field.
   final Widget child;
@@ -617,11 +665,58 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
 
   SuperTextFieldScrollviewState get _textScroll => widget.textScrollKey.currentState!;
 
+  final _mouseCursor = ValueNotifier<MouseCursor>(SystemMouseCursors.text);
+
+  void _onMouseMove(PointerHoverEvent event) {
+    _updateMouseCursor(event.position);
+  }
+
+  void _updateMouseCursor(Offset globalPosition) {
+    final localPosition = (context.findRenderObject() as RenderBox).globalToLocal(globalPosition);
+    final textOffset = _getTextOffset(localPosition);
+
+    for (final handler in widget.tapHandlers) {
+      final cursorForContent = handler.mouseCursorForContentHover(
+        SuperTextFieldGestureDetails(
+          textController: widget.textController,
+          textLayout: _textLayout,
+          globalOffset: globalPosition,
+          layoutOffset: localPosition,
+          textOffset: textOffset,
+        ),
+      );
+      if (cursorForContent != null) {
+        _mouseCursor.value = cursorForContent;
+        return;
+      }
+    }
+
+    _mouseCursor.value = SystemMouseCursors.text;
+  }
+
   void _onTapDown(TapDownDetails details) {
     _log.fine('Tap down on SuperTextField');
-    _selectionType = _SelectionType.position;
 
     final textOffset = _getTextOffset(details.localPosition);
+
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onTapDown(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+
+    _selectionType = _SelectionType.position;
+
     final tapTextPosition = _getPositionNearestToTextOffset(textOffset);
     _log.finer("Tap text position: $tapTextPosition");
 
@@ -644,10 +739,57 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
     widget.focusNode.requestFocus();
   }
 
-  void _onDoubleTapDown(TapDownDetails details) {
-    _selectionType = _SelectionType.word;
+  void _onTapUp(TapUpDetails details) {
+    final textOffset = _getTextOffset(details.localPosition);
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onTapUp(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
 
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+  }
+
+  void _onTapCancel() {
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onTapCancel();
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+  }
+
+  void _onDoubleTapDown(TapDownDetails details) {
     _log.finer('_onDoubleTapDown - EditableDocument: onDoubleTap()');
+
+    final textOffset = _getTextOffset(details.localPosition);
+
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onDoubleTapDown(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+
+    _selectionType = _SelectionType.word;
 
     final tapTextPosition = _getPositionAtOffset(details.localPosition);
 
@@ -662,14 +804,61 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
     widget.focusNode.requestFocus();
   }
 
+  void _onDoubleTapUp(TapUpDetails details) {
+    final textOffset = _getTextOffset(details.localPosition);
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onDoubleTapUp(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+  }
+
   void _onDoubleTap() {
     _selectionType = _SelectionType.position;
   }
 
-  void _onTripleTapDown(TapDownDetails details) {
-    _selectionType = _SelectionType.paragraph;
+  void _onDoubleTapCancel() {
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onDoubleTapCancel();
 
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+  }
+
+  void _onTripleTapDown(TapDownDetails details) {
     _log.finer('_onTripleTapDown - EditableDocument: onTripleTapDown()');
+
+    final textOffset = _getTextOffset(details.localPosition);
+
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onTripleTapDown(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+
+    _selectionType = _SelectionType.paragraph;
 
     final tapTextPosition = _getPositionAtOffset(details.localPosition);
 
@@ -684,12 +873,89 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
     widget.focusNode.requestFocus();
   }
 
+  void _onTripleTapUp(TapUpDetails details) {
+    final textOffset = _getTextOffset(details.localPosition);
+
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onTripleTapUp(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+  }
+
   void _onTripleTap() {
     _selectionType = _SelectionType.position;
   }
 
-  void _onRightClick(TapUpDetails details) {
+  void _onTripleTapCancel() {
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onTripleTapCancel();
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+  }
+
+  void _onRightClickDown(TapDownDetails details) {
+    final textOffset = _getTextOffset(details.localPosition);
+
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onSecondaryTapDown(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+  }
+
+  void _onRightClickUp(TapUpDetails details) {
+    final textOffset = _getTextOffset(details.localPosition);
+
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onSecondaryTapUp(
+        SuperTextFieldGestureDetails(
+          textLayout: _textLayout,
+          textController: widget.textController,
+          globalOffset: details.globalPosition,
+          layoutOffset: details.localPosition,
+          textOffset: textOffset,
+        ),
+      );
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
     widget.onRightClick?.call(context, widget.textController, details.localPosition);
+  }
+
+  void _onRightClickCancel() {
+    for (final handler in widget.tapHandlers) {
+      final result = handler.onSecondaryTapCancel();
+
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
   }
 
   void _onPanStart(DragStartDetails details) {
@@ -963,7 +1229,9 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
       onPointerSignal: _onPointerSignal,
       onPointerHover: (event) => _cancelScrollMomentum(),
       child: GestureDetector(
-        onSecondaryTapUp: _onRightClick,
+        onSecondaryTapDown: _onRightClickDown,
+        onSecondaryTapUp: _onRightClickUp,
+        onSecondaryTapCancel: _onRightClickCancel,
         child: RawGestureDetector(
           behavior: HitTestBehavior.translucent,
           gestures: <Type, GestureRecognizerFactory>{
@@ -972,9 +1240,15 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
               (TapSequenceGestureRecognizer recognizer) {
                 recognizer
                   ..onTapDown = _onTapDown
+                  ..onTapUp = _onTapUp
+                  ..onTapCancel = _onTapCancel
                   ..onDoubleTapDown = _onDoubleTapDown
+                  ..onDoubleTapUp = _onDoubleTapUp
                   ..onDoubleTap = _onDoubleTap
+                  ..onDoubleTapCancel = _onDoubleTapCancel
                   ..onTripleTapDown = _onTripleTapDown
+                  ..onTripleTapUp = _onTripleTapUp
+                  ..onTripleTapCancel = _onTripleTapCancel
                   ..onTripleTap = _onTripleTap
                   ..gestureSettings = gestureSettings;
               },
@@ -991,9 +1265,18 @@ class _SuperTextFieldGestureInteractorState extends State<SuperTextFieldGestureI
               },
             ),
           },
-          child: MouseRegion(
-            cursor: SystemMouseCursors.text,
-            child: widget.child,
+          child: Listener(
+            onPointerHover: _onMouseMove,
+            child: ValueListenableBuilder(
+              valueListenable: _mouseCursor,
+              builder: (context, mouseCursor, child) {
+                return MouseRegion(
+                  cursor: mouseCursor,
+                  child: child,
+                );
+              },
+              child: widget.child,
+            ),
           ),
         ),
       ),
