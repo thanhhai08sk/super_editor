@@ -987,7 +987,8 @@ class _AndroidDocumentTouchInteractorState extends State<AndroidDocumentTouchInt
         ..hideMagnifier()
         ..blinkCaret();
 
-      if (didTapOnExistingSelection && _isKeyboardOpen) {
+      // if (didTapOnExistingSelection && _isKeyboardOpen) {//my workaround: _isKeyboardOpen doesn't work correctly
+      if (didTapOnExistingSelection) {
         // Toggle the toolbar display when the user taps on the collapsed caret,
         // or on top of an existing selection.
         //
