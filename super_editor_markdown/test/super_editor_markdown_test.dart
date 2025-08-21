@@ -749,11 +749,23 @@ Paragraph3""");
           serializeDocumentToMarkdown(doc),
           '''
 - [x] Task 1
-- [ ] Task 2
+- [ ] Task 2  
 with multiple lines
 - [ ] Task 3
 - [x] Task 4''',
         );
+      });
+
+      test('task with styles', () {
+        final doc = MutableDocument(nodes: [
+          TaskNode(
+            id: '1',
+            text: attributedTextFromMarkdown('**Task** 1'),
+            isComplete: false,
+          ),
+        ]);
+
+        expect(serializeDocumentToMarkdown(doc), '- [ ] **Task** 1');
       });
 
       test('example doc', () {
@@ -1285,6 +1297,35 @@ This is some code
         expect((document.getNodeAt(2)! as ListItemNode).text.toPlainText(), 'list item 3');
       });
 
+      test('unordered list items mixed with task items', () {
+        const markdown = '''
+- list item node 
+- [ ] task node
+- [x] completed task node
+- second list item node 
+- [ ] another task node
+- third list item node
+- fourth list item node 
+''';
+
+        final document = deserializeMarkdownToDocument(markdown);
+
+        expect(document.nodeCount, 7);
+        expect(document.getNodeAt(0)!, isA<ListItemNode>());
+        expect(document.getNodeAt(1)!, isA<TaskNode>());
+        expect((document.getNodeAt(1) as TaskNode).text.toPlainText(), 'task node');
+        expect((document.getNodeAt(1) as TaskNode).isComplete, isFalse);
+        expect(document.getNodeAt(2)!, isA<TaskNode>());
+        expect((document.getNodeAt(2) as TaskNode).text.toPlainText(), 'completed task node');
+        expect((document.getNodeAt(2) as TaskNode).isComplete, isTrue);
+        expect(document.getNodeAt(3)!, isA<ListItemNode>());
+        expect(document.getNodeAt(4)!, isA<TaskNode>());
+        expect((document.getNodeAt(4) as TaskNode).text.toPlainText(), 'another task node');
+        expect((document.getNodeAt(4) as TaskNode).isComplete, isFalse);
+        expect(document.getNodeAt(5)!, isA<ListItemNode>());
+        expect(document.getNodeAt(6)!, isA<ListItemNode>());
+      });
+
       test('ordered list', () {
         const markdown = '''
  1. list item 1
@@ -1425,7 +1466,7 @@ This is some code
         const markdown = '''
 - [x] Task 1
 - [ ] Task 2
-- [ ] Task 3
+- [ ] Task 3  
 with multiple lines
 - [x] Task 4''';
 
@@ -1540,6 +1581,18 @@ with multiple lines
 
         // Ensure text outside the range isn't attributed.
         expect(styledText.getAllAttributionsAt(7).contains(underlineAttribution), false);
+      });
+
+      test('paragraph with inline code', () {
+        final doc = deserializeMarkdownToDocument('`This is` a paragraph.');
+        final styledText = (doc.getNodeAt(0)! as ParagraphNode).text;
+
+        // Ensure text within the range is attributed.
+        expect(styledText.getAllAttributionsAt(0).contains(codeAttribution), true);
+        expect(styledText.getAllAttributionsAt(6).contains(codeAttribution), true);
+
+        // Ensure text outside the range isn't attributed.
+        expect(styledText.getAllAttributionsAt(7).contains(codeAttribution), false);
       });
 
       test('paragraph with left alignment', () {

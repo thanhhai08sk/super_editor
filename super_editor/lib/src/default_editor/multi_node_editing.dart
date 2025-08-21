@@ -270,6 +270,13 @@ class PasteStructuredContentEditorCommand extends EditCommand {
   }
 }
 
+/// Inserts the [newNode] at the end of the document.
+class InsertNodeAtEndOfDocumentRequest implements EditRequest {
+  InsertNodeAtEndOfDocumentRequest(this.newNode);
+
+  final DocumentNode newNode;
+}
+
 class InsertNodeAtIndexRequest implements EditRequest {
   InsertNodeAtIndexRequest({
     required this.nodeIndex,
@@ -1214,7 +1221,7 @@ class DeleteSelectionCommand extends EditCommand {
 
         if (affinity == TextAffinity.upstream) {
           // The user is trying to delete using backspace (we assume this because the deletion is in
-          // downstream direction). Do nothing.
+          // upstream direction). Do nothing.
           return;
         }
 
