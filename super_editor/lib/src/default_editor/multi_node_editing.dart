@@ -135,6 +135,7 @@ class PasteStructuredContentEditorCommand extends EditCommand {
     final textNode = document.getNode(_pastePosition) as TextNode;
     final pasteTextOffset = (_pastePosition.nodePosition as TextPosition).offset;
     final nodesToInsert = List.from(_content);
+    final bool wasInitiallyEmpty = currentNodeWithSelection.text.isEmpty;
 
     // Split the original node in two, around the caret.
     TextNode? downstreamSplitNode;
@@ -148,7 +149,8 @@ class PasteStructuredContentEditorCommand extends EditCommand {
     // (Possibly) merge or delete the upstream split node.
     bool deleteInitiallySelectedNode = false;
     final firstPastedNode = nodesToInsert.first;
-    if (_canMergeNodes(currentNodeWithSelection, firstPastedNode)) {
+    final bool canMergeFirst = _canMergeNodes(currentNodeWithSelection, firstPastedNode);
+    if (canMergeFirst) {
       // The text in the first pasted node is stylistically compatible with the
       // existing text in the node where the paste was triggered. Therefore, instead
       // inserting the first pasted node, merge its content with the existing node.
@@ -164,12 +166,9 @@ class PasteStructuredContentEditorCommand extends EditCommand {
       // We've pasted the first new node. Remove it from the nodes to insert.
       nodesToInsert.removeAt(0);
     }
-    if (currentNodeWithSelection.text.length == 0) {
-      // The node with the selection is an empty text node. After we use that node's
-      // position to insert other nodes, we want to delete that first node, as if the
-      // pasted content replaced it.
-      deleteInitiallySelectedNode = true;
-    }
+    // If the initially selected node was empty and we did NOT merge into it,
+    // delete it after inserting the new content so the paste replaces it.
+    deleteInitiallySelectedNode = wasInitiallyEmpty && !canMergeFirst;
 
     // (Possibly) merge or delete the downstream split node.
     if (nodesToInsert.isNotEmpty) {
