@@ -276,6 +276,7 @@ class SuperEditorImeInteractorState extends State<SuperEditorImeInteractor> impl
       textDeltasDocumentEditor: _textDeltasDocumentEditor,
       imeConnection: _imeConnection,
       onPerformSelector: _onPerformSelector,
+      onContentInserted: widget.imeConfiguration.onContentInserted,
     );
   }
 
@@ -856,6 +857,8 @@ class SuperEditorImeConfiguration {
     this.enableSuggestions = true,
     this.keyboardBrightness = Brightness.light,
     this.keyboardActionButton = TextInputAction.newline,
+    this.allowedMimeTypes,
+    this.onContentInserted,
   });
 
   /// Whether the OS should offer auto-correction options to the user.
@@ -871,6 +874,17 @@ class SuperEditorImeConfiguration {
   /// The action button that's displayed on a software keyboard, e.g.,
   /// new-line, done, go, etc.
   final TextInputAction keyboardActionButton;
+
+  /// MIME types that are allowed for content insertion from the keyboard.
+  ///
+  /// When set, enables rich content insertion (e.g., images from Gboard clipboard).
+  /// Common values: `['image/png', 'image/jpeg', 'image/gif']`
+  final List<String>? allowedMimeTypes;
+
+  /// Callback invoked when rich content is inserted via the IME.
+  ///
+  /// This is called when the user pastes an image from a keyboard like Gboard.
+  final void Function(KeyboardInsertedContent content)? onContentInserted;
 
   /// Converts this configuration to a [TextInputConfiguration] that can be used to attach to the IME.
   ///
@@ -888,6 +902,7 @@ class SuperEditorImeConfiguration {
       enableSuggestions: enableSuggestions,
       inputAction: keyboardActionButton,
       keyboardAppearance: keyboardBrightness,
+      allowedMimeTypes: allowedMimeTypes ?? const <String>[],
     );
   }
 
@@ -897,12 +912,16 @@ class SuperEditorImeConfiguration {
     Brightness? keyboardBrightness,
     TextInputAction? keyboardActionButton,
     bool? clearSelectionWhenImeDisconnects,
+    List<String>? allowedMimeTypes,
+    void Function(KeyboardInsertedContent content)? onContentInserted,
   }) {
     return SuperEditorImeConfiguration(
       enableAutocorrect: enableAutocorrect ?? this.enableAutocorrect,
       enableSuggestions: enableSuggestions ?? this.enableSuggestions,
       keyboardBrightness: keyboardBrightness ?? this.keyboardBrightness,
       keyboardActionButton: keyboardActionButton ?? this.keyboardActionButton,
+      allowedMimeTypes: allowedMimeTypes ?? this.allowedMimeTypes,
+      onContentInserted: onContentInserted ?? this.onContentInserted,
     );
   }
 

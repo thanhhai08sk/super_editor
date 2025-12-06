@@ -105,6 +105,11 @@ class DeltaTextInputClientDecorator with DeltaTextInputClient, TextInputClient {
   }
 
   @override
+  void insertContent(KeyboardInsertedContent content) {
+    _client?.insertContent(content);
+  }
+
+  @override
   void showAutocorrectionPromptRect(int start, int end) {
     _client?.showAutocorrectionPromptRect(start, end);
   }

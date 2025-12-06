@@ -27,6 +27,7 @@ class DocumentImeInputClient extends TextInputConnectionDecorator with TextInput
     required this.imeConnection,
     required this.onPerformSelector,
     this.floatingCursorController,
+    this.onContentInserted,
   }) {
     // Note: we don't listen to document changes because we expect that any change during IME
     // editing will also include a selection change. If we listen to documents and selections, then
@@ -67,6 +68,9 @@ class DocumentImeInputClient extends TextInputConnectionDecorator with TextInput
 
   // TODO: get floating cursor out of here. Use a multi-client IME decorator to split responsibilities
   late FloatingCursorController? floatingCursorController;
+
+  /// Callback invoked when rich content (e.g., images) is inserted via the IME.
+  final void Function(KeyboardInsertedContent content)? onContentInserted;
 
   /// Whether the floating cursor is being displayed.
   ///
@@ -307,6 +311,12 @@ class DocumentImeInputClient extends TextInputConnectionDecorator with TextInput
 
   @override
   void performPrivateCommand(String action, Map<String, dynamic> data) {}
+
+  @override
+  void insertContent(KeyboardInsertedContent content) {
+    editorImeLog.fine("IME says to insert content: ${content.mimeType}");
+    onContentInserted?.call(content);
+  }
 
   @override
   void showAutocorrectionPromptRect(int start, int end) {}
