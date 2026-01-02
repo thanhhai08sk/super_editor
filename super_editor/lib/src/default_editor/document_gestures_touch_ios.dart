@@ -1516,7 +1516,11 @@ class SuperEditorIosToolbarOverlayManagerState extends State<SuperEditorIosToolb
     super.didChangeDependencies();
 
     _controlsController = SuperEditorIosControlsScope.rootOf(context);
-    _overlayPortalController.show();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _overlayPortalController.show();
+      }
+    });
   }
 
   @visibleForTesting
@@ -1578,7 +1582,11 @@ class SuperEditorIosMagnifierOverlayManagerState extends State<SuperEditorIosMag
   void didChangeDependencies() {
     super.didChangeDependencies();
     _controlsController = SuperEditorIosControlsScope.rootOf(context);
-    _overlayPortalController.show();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _overlayPortalController.show();
+      }
+    });
   }
 
   @override

@@ -1077,7 +1077,11 @@ class SuperReaderIosToolbarOverlayManagerState extends State<SuperReaderIosToolb
     super.didChangeDependencies();
 
     _controlsContext = SuperReaderIosControlsScope.rootOf(context);
-    _overlayPortalController.show();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _overlayPortalController.show();
+      }
+    });
   }
 
   @override
@@ -1138,7 +1142,11 @@ class SuperReaderIosMagnifierOverlayManagerState extends State<SuperReaderIosMag
 
     _controlsContext = SuperReaderIosControlsScope.rootOf(context);
 
-    _overlayPortalController.show();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _overlayPortalController.show();
+      }
+    });
   }
 
   @override
