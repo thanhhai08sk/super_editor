@@ -335,7 +335,7 @@ class DeleteUpstreamAtBeginningOfBlockNodeCommand extends EditCommand {
   void execute(EditContext context, CommandExecutor executor) {
     final document = context.document;
     final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
-    final documentLayoutEditable = context.find<DocumentLayoutEditable>(Editor.layoutKey);
+    final documentLayoutEditable = context.findMaybe<DocumentLayoutEditable>(Editor.layoutKey);
 
     final deletionPosition = DocumentPosition(nodeId: node.id, nodePosition: node.beginningPosition);
 
@@ -366,6 +366,11 @@ class DeleteUpstreamAtBeginningOfBlockNodeCommand extends EditCommand {
       return;
     }
 
+    if (documentLayoutEditable == null) {
+      // Editor being disposed - can't check visual selection support, just move selection
+      moveSelectionToEndOfPrecedingNode(executor, document, composer);
+      return;
+    }
     final componentBefore = documentLayoutEditable.documentLayout.getComponentByNodeId(nodeBefore.id)!;
     if (!componentBefore.isVisualSelectionSupported()) {
       // The node/component above is not selectable. Delete it.

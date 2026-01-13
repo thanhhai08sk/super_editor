@@ -974,7 +974,7 @@ class DeleteUpstreamAtBeginningOfParagraphCommand extends EditCommand {
 
     final document = context.document;
     final composer = context.find<MutableDocumentComposer>(Editor.composerKey);
-    final documentLayoutEditable = context.find<DocumentLayoutEditable>(Editor.layoutKey);
+    final documentLayoutEditable = context.findMaybe<DocumentLayoutEditable>(Editor.layoutKey);
 
     final paragraphNode = node as ParagraphNode;
     if (paragraphNode.metadata["blockType"] != paragraphAttribution) {
@@ -1003,6 +1003,11 @@ class DeleteUpstreamAtBeginningOfParagraphCommand extends EditCommand {
       return;
     }
 
+    if (documentLayoutEditable == null) {
+      // Editor being disposed - can't check visual selection support, just move selection
+      moveSelectionToEndOfPrecedingNode(executor, document, composer);
+      return;
+    }
     final componentBefore = documentLayoutEditable.documentLayout.getComponentByNodeId(nodeBefore.id)!;
     if (!componentBefore.isVisualSelectionSupported()) {
       // The node/component above is not selectable. Delete it.

@@ -1176,7 +1176,11 @@ class DeleteSelectionCommand extends EditCommand {
       // The selection is contained within a single node. Prevent the deletion
       // if the node is non-deletable. When there are multiple nodes selected,
       // non-deletable nodes are ignored inside DeleteContentCommand.
-      final node = document.getNodeById(selection.base.nodeId)!;
+      final node = document.getNodeById(selection.base.nodeId);
+      if (node == null) {
+        // Node was deleted between selection and command execution
+        return;
+      }
       if (!node.isDeletable) {
         if (node is BlockNode && !selection.isCollapsed) {
           // On iOS, pressing backspace generates a non-text delta expanding the selection
@@ -1207,8 +1211,12 @@ class DeleteSelectionCommand extends EditCommand {
 
     if (nodes.length == 2) {
       final normalizedSelection = selection.normalize(document);
-      final nodeAbove = document.getNode(normalizedSelection.start)!;
-      final nodeBelow = document.getNode(normalizedSelection.end)!;
+      final nodeAbove = document.getNode(normalizedSelection.start);
+      final nodeBelow = document.getNode(normalizedSelection.end);
+      if (nodeAbove == null || nodeBelow == null) {
+        // Node(s) deleted between selection and command execution
+        return;
+      }
 
       if (nodeAbove is BlockNode &&
           !nodeAbove.isDeletable &&

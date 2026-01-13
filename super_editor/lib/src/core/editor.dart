@@ -257,6 +257,22 @@ class Editor implements RequestDispatcher {
       startTransaction();
     }
 
+    // Safety: Handle corrupted transaction state.
+    // This can occur if a previous transaction threw an exception,
+    // or if a gesture callback fires on a stale Editor reference.
+    if (_activeChangeList == null || _transaction == null) {
+      editorEditsLog.warning(
+        'Transaction state corrupted: _isInTransaction=$_isInTransaction, '
+        '_activeChangeList=${_activeChangeList != null}, '
+        '_transaction=${_transaction != null}. Resetting.',
+      );
+      _isInTransaction = false;
+      _activeChangeList = null;
+      _transaction = null;
+      _isImplicitTransaction = true;
+      startTransaction();
+    }
+
     _activeCommandCount += 1;
 
     final undoableCommands = <EditCommand>[];

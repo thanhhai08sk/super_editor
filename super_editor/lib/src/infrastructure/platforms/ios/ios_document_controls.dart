@@ -697,10 +697,10 @@ class IosControlsDocumentLayerState extends DocumentLayoutLayerState<IosHandlesD
   /// top and bottom of the selection hightlight box. This method computes an
   /// expanded selection based on the given [position], computes the box for that
   /// selection, and returns the edge of the selection box.
-  Rect _computeRectForExpandedHandle(DocumentPosition position) {
+  Rect? _computeRectForExpandedHandle(DocumentPosition position) {
     final component = widget.documentLayout.getComponentByNodeId(position.nodeId);
     if (component == null) {
-      return Rect.zero;
+      return null;
     }
 
     // Check if we have a position to the right of the current position within the same node.
@@ -718,7 +718,11 @@ class IosControlsDocumentLayerState extends DocumentLayoutLayerState<IosHandlesD
       // to rect for the position, which relies on Flutter's computation for the
       // caret offset and height. Flutter's computation produces different offset
       // a height from what is returned by the selection highlight box.
-      return widget.documentLayout.getRectForPosition(position)!;
+      final rect = widget.documentLayout.getRectForPosition(position);
+      if (rect == null) {
+        return null;
+      }
+      return rect;
     }
 
     final rectForSelection = widget.documentLayout.getRectForSelection(
@@ -727,7 +731,10 @@ class IosControlsDocumentLayerState extends DocumentLayoutLayerState<IosHandlesD
         nodeId: position.nodeId,
         nodePosition: extentNodePosition,
       ),
-    )!;
+    );
+    if (rectForSelection == null) {
+      return null;
+    }
 
     return Rect.fromLTWH(
       isExtentDownstream ? rectForSelection.left : rectForSelection.right,
@@ -751,7 +758,13 @@ class IosControlsDocumentLayerState extends DocumentLayoutLayerState<IosHandlesD
     }
 
     if (selection.isCollapsed) {
-      Rect caretRect = documentLayout.getEdgeForPosition(selection.extent)!;
+      final caretRectOrNull = documentLayout.getEdgeForPosition(selection.extent);
+      if (caretRectOrNull == null) {
+        // Selection points to a node that no longer exists in layout.
+        // Skip rendering this frame; layout will update on next rebuild.
+        return null;
+      }
+      Rect caretRect = caretRectOrNull;
 
       // Default caret width used by IOSCollapsedHandle.
       const caretWidth = 2;
@@ -785,13 +798,19 @@ class IosControlsDocumentLayerState extends DocumentLayoutLayerState<IosHandlesD
         caret: caretRect,
       );
     } else {
+      final upstream = _computeRectForExpandedHandle(
+        widget.document.selectUpstreamPosition(selection.base, selection.extent),
+      );
+      final downstream = _computeRectForExpandedHandle(
+        widget.document.selectDownstreamPosition(selection.base, selection.extent),
+      );
+      if (upstream == null || downstream == null) {
+        // Selection points to nodes that no longer exist in layout.
+        return null;
+      }
       return DocumentSelectionLayout(
-        upstream: _computeRectForExpandedHandle(
-          widget.document.selectUpstreamPosition(selection.base, selection.extent),
-        ),
-        downstream: _computeRectForExpandedHandle(
-          widget.document.selectDownstreamPosition(selection.base, selection.extent),
-        ),
+        upstream: upstream,
+        downstream: downstream,
         expandedSelectionBounds: documentLayout.getRectForSelection(
           selection.base,
           selection.extent,

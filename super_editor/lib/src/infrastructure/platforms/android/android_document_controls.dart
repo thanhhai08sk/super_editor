@@ -335,7 +335,12 @@ class AndroidControlsDocumentLayerState
     }
 
     if (selection.isCollapsed && !_controlsController!.shouldShowExpandedHandles.value) {
-      Rect caretRect = documentLayout.getEdgeForPosition(selection.extent)!;
+      final caretRectOrNull = documentLayout.getEdgeForPosition(selection.extent);
+      if (caretRectOrNull == null) {
+        // Selection points to a node that no longer exists in layout.
+        return null;
+      }
+      Rect caretRect = caretRectOrNull;
 
       // Default caret width used by the Android caret.
       const caretWidth = 2;
@@ -369,13 +374,19 @@ class AndroidControlsDocumentLayerState
         caret: caretRect,
       );
     } else {
+      final upstreamRect = documentLayout.getRectForPosition(
+        widget.document.selectUpstreamPosition(selection.base, selection.extent),
+      );
+      final downstreamRect = documentLayout.getRectForPosition(
+        widget.document.selectDownstreamPosition(selection.base, selection.extent),
+      );
+      if (upstreamRect == null || downstreamRect == null) {
+        // Selection points to nodes that no longer exist in layout.
+        return null;
+      }
       return DocumentSelectionLayout(
-        upstream: documentLayout.getRectForPosition(
-          widget.document.selectUpstreamPosition(selection.base, selection.extent),
-        )!,
-        downstream: documentLayout.getRectForPosition(
-          widget.document.selectDownstreamPosition(selection.base, selection.extent),
-        )!,
+        upstream: upstreamRect,
+        downstream: downstreamRect,
         expandedSelectionBounds: documentLayout.getRectForSelection(
           selection.base,
           selection.extent,
