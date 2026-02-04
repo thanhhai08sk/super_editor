@@ -557,7 +557,7 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
       // No document position found (e.g., empty field). Try to place caret
       // at the first position in the document, then show toolbar to allow
       // paste functionality, matching Android behavior.
-      final firstNode = widget.document.nodes.firstOrNull;
+      final firstNode = widget.document.firstOrNull;
       if (firstNode != null) {
         final firstPosition = DocumentPosition(
           nodeId: firstNode.id,
