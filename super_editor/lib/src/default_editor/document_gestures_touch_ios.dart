@@ -626,6 +626,13 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
     // Stop waiting for a long-press to start.
     _globalTapDownOffset = null;
     _tapDownLongPressTimer?.cancel();
+
+    // Cancel any on-going long-press and show toolbar.
+    if (_isLongPressInProgress) {
+      _onLongPressEnd();
+      return;
+    }
+
     _controlsController!
       ..hideMagnifier()
       ..blinkCaret();
@@ -1186,7 +1193,10 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
     _longPressStrategy = null;
     _dragMode = null;
 
-    _updateOverlayControlsAfterFinishingDragSelection();
+    _controlsController!.hideMagnifier();
+    // Always show toolbar after long-press (even for collapsed selection)
+    // to allow paste functionality, matching Android behavior.
+    _controlsController!.showToolbar();
   }
 
   void _onHandleDragEnd() {
