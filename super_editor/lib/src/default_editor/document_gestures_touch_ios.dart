@@ -554,6 +554,25 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
     final tapDownDocumentOffset = _interactorOffsetToDocumentOffset(interactorOffset);
     final tapDownDocumentPosition = _docLayout.getDocumentPositionNearestToOffset(tapDownDocumentOffset);
     if (tapDownDocumentPosition == null) {
+      // No document position found (e.g., empty field). Try to place caret
+      // at the first position in the document, then show toolbar to allow
+      // paste functionality, matching Android behavior.
+      final firstNode = widget.document.nodes.firstOrNull;
+      if (firstNode != null) {
+        final firstPosition = DocumentPosition(
+          nodeId: firstNode.id,
+          nodePosition: firstNode.beginningPosition,
+        );
+        widget.editor.execute([
+          ChangeSelectionRequest(
+            DocumentSelection.collapsed(position: firstPosition),
+            SelectionChangeType.placeCaret,
+            SelectionReason.userInteraction,
+          ),
+        ]);
+      }
+      _controlsController!.showToolbar();
+      widget.focusNode.requestFocus();
       return;
     }
 
@@ -575,7 +594,18 @@ class _IosDocumentTouchInteractorState extends State<IosDocumentTouchInteractor>
       tapDownDocumentOffset: tapDownDocumentOffset,
     );
     if (!didLongPressSelectionStart) {
+      // No word to select (e.g., empty paragraph). Place caret at tap position
+      // and show toolbar to allow paste functionality, matching Android behavior.
       _longPressStrategy = null;
+      widget.editor.execute([
+        ChangeSelectionRequest(
+          DocumentSelection.collapsed(position: tapDownDocumentPosition),
+          SelectionChangeType.placeCaret,
+          SelectionReason.userInteraction,
+        ),
+      ]);
+      _controlsController!.showToolbar();
+      widget.focusNode.requestFocus();
       return;
     }
 
