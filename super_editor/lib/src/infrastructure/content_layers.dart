@@ -704,6 +704,10 @@ class RenderContentLayers extends RenderSliver with RenderSliverHelpers {
 
     // First, hit-test overlays.
     for (final overlay in _overlays) {
+      if ((overlay.parentData! as SliverLogicalParentData).layoutOffset == null) {
+        // Layer not yet laid out — skip to avoid hit-testing at the wrong position.
+        continue;
+      }
       didHit =
           hitTestBoxChild(boxResult, overlay, mainAxisPosition: mainAxisPosition, crossAxisPosition: crossAxisPosition);
       if (didHit) {
@@ -719,6 +723,9 @@ class RenderContentLayers extends RenderSliver with RenderSliverHelpers {
 
     // Third, hit-test the underlays.
     for (final underlay in _underlays) {
+      if ((underlay.parentData! as SliverLogicalParentData).layoutOffset == null) {
+        continue;
+      }
       didHit = hitTestBoxChild(boxResult, underlay,
           mainAxisPosition: mainAxisPosition, crossAxisPosition: crossAxisPosition);
       if (didHit) {
@@ -737,9 +744,16 @@ class RenderContentLayers extends RenderSliver with RenderSliverHelpers {
 
     void paintChild(RenderObject child) {
       final childParentData = child.parentData! as SliverLogicalParentData;
+      final layoutOffset = childParentData.layoutOffset;
+      if (layoutOffset == null) {
+        // Layer hasn't been laid out yet (inserted between layout and paint).
+        // Skip this frame to avoid a null-check crash; it will paint correctly
+        // on the next frame after performLayout runs.
+        return;
+      }
       context.paintChild(
         child,
-        offset + Offset(0, childParentData.layoutOffset!),
+        offset + Offset(0, layoutOffset),
       );
     }
 
@@ -760,13 +774,17 @@ class RenderContentLayers extends RenderSliver with RenderSliverHelpers {
   @override
   void applyPaintTransform(covariant RenderObject child, Matrix4 transform) {
     final childParentData = child.parentData! as SliverLogicalParentData;
-    transform.translate(0.0, childParentData.layoutOffset!);
+    final layoutOffset = childParentData.layoutOffset;
+    if (layoutOffset == null) {
+      return;
+    }
+    transform.translate(0.0, layoutOffset);
   }
 
   @override
   double childMainAxisPosition(covariant RenderObject child) {
     final childParentData = child.parentData! as SliverLogicalParentData;
-    return childParentData.layoutOffset!;
+    return childParentData.layoutOffset ?? 0.0;
   }
 
   @override
