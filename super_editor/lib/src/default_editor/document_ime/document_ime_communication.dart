@@ -28,7 +28,7 @@ class DocumentImeInputClient extends TextInputConnectionDecorator with TextInput
     required this.onPerformSelector,
     this.floatingCursorController,
     this.onContentInserted,
-  }) {
+  }) : super(imeConnection.value) {
     // Note: we don't listen to document changes because we expect that any change during IME
     // editing will also include a selection change. If we listen to documents and selections, then
     // we'll attempt to serialize the document change before the selection change is made. This
@@ -172,6 +172,7 @@ class DocumentImeInputClient extends TextInputConnectionDecorator with TextInput
 
   @override
   TextEditingValue get currentTextEditingValue => _currentTextEditingValue;
+
   TextEditingValue _currentTextEditingValue = const TextEditingValue();
 
   // What the platform IME *thinks* the current value is.

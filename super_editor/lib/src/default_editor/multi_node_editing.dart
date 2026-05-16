@@ -80,25 +80,49 @@ class PasteStructuredContentEditorCommand extends EditCommand {
           textToInsert: (pastedNode as TextNode).text,
         ),
       );
-      executor.executeCommand(
-        ChangeSelectionCommand(
-          DocumentSelection.collapsed(
-            position: DocumentPosition(
-              nodeId: pastePosition.nodeId,
-              nodePosition: TextNodePosition(
-                  offset: (pastePosition.nodePosition as TextNodePosition).offset + pastedNode.text.length),
+      executor
+        ..executeCommand(
+          ChangeSelectionCommand(
+            DocumentSelection.collapsed(
+              position: DocumentPosition(
+                nodeId: pastePosition.nodeId,
+                nodePosition: TextNodePosition(
+                    offset: (pastePosition.nodePosition as TextNodePosition).offset + pastedNode.text.length),
+              ),
             ),
+            SelectionChangeType.insertContent,
+            SelectionReason.userInteraction,
           ),
-          SelectionChangeType.insertContent,
-          SelectionReason.userInteraction,
-        ),
-      );
+        )
+        // Clear the composing region after content change and selection move.
+        ..executeCommand(ChangeComposingRegionCommand(null));
 
       return;
     }
 
-    final (upstreamNodeId, _) = _splitPasteParagraph(
-        executor, currentNodeWithSelection.id, (pastePosition.nodePosition as TextNodePosition).offset);
+    late final String upstreamNodeId;
+    DocumentPosition? caretPositionAfterPaste;
+
+    if (currentNodeWithSelection.text.isEmpty ||
+        (pastePosition.nodePosition as TextNodePosition).offset == currentNodeWithSelection.text.length) {
+      // We're pasting into an empty node, or pasting at the very end of a non-empty `TextNode`.
+      // We already know we can't combine the pasted content with this node. We'll paste below
+      // this node.
+      upstreamNodeId = currentNodeWithSelection.id;
+    } else {
+      // We're pasting into the middle of a non-empty text node. We already know we can't combine
+      // the pasted content with this node. Split the selected node before pasting.
+      final (splitUpstreamNodeId, splitDownstreamNodeId) = _splitPasteParagraph(
+          executor, currentNodeWithSelection.id, (pastePosition.nodePosition as TextNodePosition).offset);
+      upstreamNodeId = splitUpstreamNodeId;
+
+      // Since we split a non-empty paragraph, we'll insert the caret at the start
+      // of the 2nd half of the split text.
+      caretPositionAfterPaste = DocumentPosition(
+        nodeId: splitDownstreamNodeId,
+        nodePosition: const TextNodePosition(offset: 0),
+      );
+    }
 
     // Insert the pasted node after the split upstream node.
     document.insertNodeAfter(
@@ -108,22 +132,61 @@ class PasteStructuredContentEditorCommand extends EditCommand {
     executor.logChanges([
       DocumentEdit(
         NodeInsertedEvent(pastedNode.id, document.getNodeIndexById(pastedNode.id)),
-      )
+      ),
     ]);
 
-    // Place the caret at the end of the pasted content.
-    executor.executeCommand(
-      ChangeSelectionCommand(
-        DocumentSelection.collapsed(
-          position: DocumentPosition(
-            nodeId: pastedNode.id,
-            nodePosition: pastedNode.endPosition,
-          ),
+    // Maybe delete the original selected node, and maybe insert empty paragraph at end.
+    if (currentNodeWithSelection.text.isEmpty) {
+      // We pasted content below the selected node, but the selected node was empty.
+      // As a UX policy, let's delete that empty paragraph because a user won't expect
+      // it to stay around.
+      document.deleteNode(currentNodeWithSelection.id);
+      executor.logChanges([
+        DocumentEdit(
+          NodeRemovedEvent(pastedNode.id, currentNodeWithSelection),
         ),
-        SelectionChangeType.insertContent,
-        SelectionReason.userInteraction,
-      ),
+      ]);
+
+      if (pastedNode is! TextNode) {
+        // The pasted content isn't text. It might be an image, table, etc. As a UX
+        // policy, we insert an empty paragraph after the pasted content because users
+        // typically expect to be able to start typing after pasting.
+        final newNodeId = Editor.createNodeId();
+        document.insertNodeAfter(
+          existingNodeId: pastedNode.id,
+          newNode: ParagraphNode(id: newNodeId, text: AttributedText()),
+        );
+        executor.logChanges([
+          DocumentEdit(
+            NodeInsertedEvent(newNodeId, document.getNodeIndexById(newNodeId)),
+          ),
+        ]);
+
+        caretPositionAfterPaste = DocumentPosition(nodeId: newNodeId, nodePosition: const TextNodePosition(offset: 0));
+      }
+    }
+
+    // We didn't split a non-empty paragraph, and we didn't insert a new empty paragraph
+    // at the end of the pasted content. Therefore, place the caret at the end of the pasted
+    // content.
+    caretPositionAfterPaste ??= DocumentPosition(
+      nodeId: pastedNode.id,
+      nodePosition: pastedNode.endPosition,
     );
+
+    // Place the caret at the end of the pasted content.
+    executor
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(
+            position: caretPositionAfterPaste,
+          ),
+          SelectionChangeType.insertContent,
+          SelectionReason.userInteraction,
+        ),
+      )
+      // Clear the composing region after content change and selection move.
+      ..executeCommand(ChangeComposingRegionCommand(null));
   }
 
   void _pasteMultipleNodes(
@@ -170,6 +233,9 @@ class PasteStructuredContentEditorCommand extends EditCommand {
     // delete it after inserting the new content so the paste replaces it.
     deleteInitiallySelectedNode = wasInitiallyEmpty && !canMergeFirst;
 
+    // The caret position we want after the paste.
+    DocumentPosition? pasteEndPosition;
+
     // (Possibly) merge or delete the downstream split node.
     if (nodesToInsert.isNotEmpty) {
       final lastPastedNode = nodesToInsert.last;
@@ -192,6 +258,13 @@ class PasteStructuredContentEditorCommand extends EditCommand {
 
         // We've pasted the last new node. Remove it from the nodes to insert.
         nodesToInsert.removeLast();
+
+        // Since we combined the last paste node with the 2nd half of the original
+        // node, the caret position sits in the middle of that combined node.
+        pasteEndPosition = DocumentPosition(
+          nodeId: downstreamSplitNode.id,
+          nodePosition: TextNodePosition(offset: lastPastedNode.text.length),
+        );
       }
     }
 
@@ -211,6 +284,10 @@ class PasteStructuredContentEditorCommand extends EditCommand {
         )
       ]);
     }
+    pasteEndPosition ??= DocumentPosition(
+      nodeId: previousNode.id,
+      nodePosition: previousNode.endPosition,
+    );
 
     if (deleteInitiallySelectedNode) {
       document.deleteNode(currentNodeWithSelection.id);
@@ -222,18 +299,17 @@ class PasteStructuredContentEditorCommand extends EditCommand {
     }
 
     // Place the caret at the end of the pasted content.
-    executor.executeCommand(
-      ChangeSelectionCommand(
-        DocumentSelection.collapsed(
-          position: DocumentPosition(
-            nodeId: previousNode.id,
-            nodePosition: previousNode.endPosition,
-          ),
+    executor
+      ..executeCommand(
+        ChangeSelectionCommand(
+          DocumentSelection.collapsed(position: pasteEndPosition),
+          SelectionChangeType.insertContent,
+          SelectionReason.userInteraction,
         ),
-        SelectionChangeType.insertContent,
-        SelectionReason.userInteraction,
-      ),
-    );
+      )
+      // The content changed, and the selection moved. Clear the composing region to
+      // ensure we don't try to report an invalid region.
+      ..executeCommand(ChangeComposingRegionCommand(null));
   }
 
   (String upstreamNode, String downstreamNode) _splitPasteParagraph(
@@ -500,11 +576,15 @@ class InsertNodeAtCaretCommand extends EditCommand {
       );
     }
 
-    executor.executeCommand(ChangeSelectionCommand(
-      newSelection,
-      SelectionChangeType.insertContent,
-      SelectionReason.userInteraction,
-    ));
+    executor
+      ..executeCommand(ChangeSelectionCommand(
+        newSelection,
+        SelectionChangeType.insertContent,
+        SelectionReason.userInteraction,
+      ))
+      // The existing composing region is probably still valid (in terms of content),
+      // but the selection moved, so clear it.
+      ..executeCommand(ChangeComposingRegionCommand(null));
   }
 }
 
@@ -664,17 +744,21 @@ class ReplaceNodeWithEmptyParagraphWithCaretCommand extends EditCommand {
       ),
     ]);
 
-    executor.executeCommand(ChangeSelectionCommand(
-      DocumentSelection.collapsed(
-        position: DocumentPosition(
-          nodeId: newNode.id,
-          nodePosition: newNode.beginningPosition,
+    executor
+      ..executeCommand(ChangeSelectionCommand(
+        DocumentSelection.collapsed(
+          position: DocumentPosition(
+            nodeId: newNode.id,
+            nodePosition: newNode.beginningPosition,
+          ),
         ),
-      ),
-      SelectionChangeType.placeCaret,
-      SelectionReason.userInteraction,
-      notifyListeners: false,
-    ));
+        SelectionChangeType.placeCaret,
+        SelectionReason.userInteraction,
+        notifyListeners: false,
+      ))
+      // The content changed, and selection moved, so the previous composing region
+      // no longer applies, and might even be invalid. Clear it.
+      ..executeCommand(ChangeComposingRegionCommand(null));
   }
 }
 
@@ -1280,6 +1364,10 @@ class DeleteSelectionCommand extends EditCommand {
         ),
       );
     }
+
+    // We expect that the selection is now collapsed, and also is probably in a different
+    // location. Clear the composing region.
+    executor.executeCommand(ChangeComposingRegionCommand(null));
   }
 }
 
@@ -1338,6 +1426,59 @@ class DeleteNodeCommand extends EditCommand {
         NodeRemovedEvent(node.id, node),
       )
     ]);
+  }
+}
+
+/// An [EditRequest] that replaces the current document content with the given
+/// [nodes].
+///
+/// This request deletes all existing content, clears the selection, and then
+/// inserts the new nodes.
+class ReplaceDocumentRequest implements EditRequest {
+  const ReplaceDocumentRequest(this.nodes);
+
+  final List<DocumentNode> nodes;
+}
+
+class ReplaceDocumentCommand extends EditCommand {
+  const ReplaceDocumentCommand(this.nodes);
+
+  final List<DocumentNode> nodes;
+
+  @override
+  void execute(EditContext context, CommandExecutor executor) {
+    executor
+      // Clear selection before deleting content so that we don't have
+      // a momentarily illegal selection.
+      ..executeCommand(
+        const ChangeSelectionCommand(
+          null,
+          SelectionChangeType.alteredContent,
+          SelectionReason.contentChange,
+        ),
+      )
+      ..executeCommand(ClearDocumentCommand())
+      // Clear selection again because `ClearDocumentCommand` sets a selection.
+      //
+      // Note: `ClearDocumentCommand` also clears the composing region, which we
+      //       want here as well.
+      ..executeCommand(
+        const ChangeSelectionCommand(
+          null,
+          SelectionChangeType.alteredContent,
+          SelectionReason.contentChange,
+        ),
+      )
+      ..executeCommand(DeleteNodeCommand(nodeId: context.document.first.id));
+
+    for (final node in nodes) {
+      executor.executeCommand(
+        InsertNodeAtIndexCommand(
+          nodeIndex: context.document.length,
+          newNode: node,
+        ),
+      );
+    }
   }
 }
 

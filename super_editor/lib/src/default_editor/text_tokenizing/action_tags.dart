@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:attributed_text/attributed_text.dart';
 import 'package:characters/characters.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/core/document.dart';
@@ -39,9 +40,12 @@ import 'package:super_editor/src/infrastructure/keyboard.dart';
 /// of a user's desire to take an action. It's not a persistent reference, like
 /// a user tag, or a hash tag.
 class ActionTagsPlugin extends SuperEditorPlugin {
+  static const defaultActionTagId = "composingActionTag";
+
   ActionTagsPlugin({
-    TagRule tagRule = defaultActionTagRule,
-  }) : _tagRule = tagRule {
+    TagRule? tagRule,
+    this.actionTagId = defaultActionTagId,
+  }) : this.tagRule = tagRule ?? defaultActionTagRule {
     _requestHandlers = <EditRequestHandler>[
       (editor, request) => request is SubmitComposingActionTagRequest //
           ? SubmitComposingActionTagCommand()
@@ -53,24 +57,33 @@ class ActionTagsPlugin extends SuperEditorPlugin {
 
     _reactions = [
       ActionTagComposingReaction(
-        tagRule: tagRule,
+        tagRule: this.tagRule,
         onUpdateComposingActionTag: (composingTag) {
-          _composingActionTag.value = composingTag;
+          composingActionTag.value = composingTag;
         },
       ),
     ];
   }
 
-  final TagRule _tagRule;
+  void dispose() {
+    composingActionTag.dispose();
+  }
+
+  /// The tag rule, which is used to identify when a user's input qualifies as an
+  /// action tag.
+  final TagRule tagRule;
+
+  /// The ID which is used to register the [composingActionTag] with an [Editor]'s
+  /// context, allowing anyone with the [Editor] to query the action tag.
+  final String actionTagId;
 
   /// The action tag that the user is currently composing.
-  ValueListenable<IndexedTag?> get composingActionTag => _composingActionTag;
-  final _composingActionTag = ValueNotifier<IndexedTag?>(null);
+  final composingActionTag = ComposingActionTag();
 
   @override
   void attach(Editor editor) {
     editor
-      ..context.put(_composingActionTagKey, ComposingActionTag())
+      ..context.put(actionTagId, composingActionTag)
       ..requestHandlers.insertAll(0, _requestHandlers)
       ..reactionPipeline.insertAll(0, _reactions);
   }
@@ -78,7 +91,7 @@ class ActionTagsPlugin extends SuperEditorPlugin {
   @override
   void detach(Editor editor) {
     editor
-      ..context.remove(_composingActionTagKey)
+      ..context.remove(actionTagId, composingActionTag)
       ..requestHandlers.removeWhere((item) => _requestHandlers.contains(item))
       ..reactionPipeline.removeWhere((item) => _reactions.contains(item));
   }
@@ -88,7 +101,7 @@ class ActionTagsPlugin extends SuperEditorPlugin {
   late final List<EditReaction> _reactions;
 
   @override
-  List<DocumentKeyboardAction> get keyboardActions => [_cancelOnEscape];
+  List<SuperEditorKeyboardAction> get keyboardActions => [_cancelOnEscape];
   ExecutionInstruction _cancelOnEscape({
     required SuperEditorContext editContext,
     required KeyEvent keyEvent,
@@ -102,14 +115,14 @@ class ActionTagsPlugin extends SuperEditorPlugin {
     }
 
     editContext.editor.execute([
-      CancelComposingActionTagRequest(_tagRule),
+      CancelComposingActionTagRequest(tagRule),
     ]);
 
     return ExecutionInstruction.haltExecution;
   }
 }
 
-const defaultActionTagRule = TagRule(trigger: "/", excludedCharacters: {" "});
+final defaultActionTagRule = TagRule(trigger: "/", excludedCharacters: {" "});
 
 class SubmitComposingActionTagRequest implements EditRequest {
   const SubmitComposingActionTagRequest();
@@ -326,6 +339,17 @@ class ActionTagComposingReaction extends EditReaction {
       return;
     }
 
+    final hasComposingTagAttribution = textNode!.text
+        .getAttributionSpansInRange(
+          attributionFilter: (attribution) => attribution == actionTagComposingAttribution,
+          range: SpanRange(tagAroundPosition.indexedTag.startOffset, tagAroundPosition.indexedTag.endOffset),
+        )
+        .isNotEmpty;
+    if (changeList.none((event) => event is DocumentEdit) && !hasComposingTagAttribution) {
+      // The user is neither typing nor moving the caret within an existing composing tag.
+      return;
+    }
+
     _updateComposingTag(requestDispatcher, tagAroundPosition.indexedTag);
     editorContext.composingActionTag.value = tagAroundPosition.indexedTag;
     _onUpdateComposingActionTag(tagAroundPosition.indexedTag);
@@ -372,17 +396,19 @@ class ActionTagComposingReaction extends EditReaction {
 
     for (final range in cancelledTagRanges) {
       final cancelledText = node.text.substring(range.start, range.end + 1); // +1 because substring is exclusive
-      if (cancelledText == _tagRule.trigger) {
+      if (_tagRule.isTrigger(cancelledText)) {
         // This is a legitimate cancellation attribution.
         continue;
       }
 
       DocumentSelection? addedRange;
-      if (cancelledText.contains(_tagRule.trigger)) {
-        // This cancelled range includes more than just a trigger. Reduce it back
-        // down to the trigger.
-        final triggerIndex = cancelledText.indexOf(_tagRule.trigger);
-        addedRange = node.selectionBetween(triggerIndex, triggerIndex);
+      for (final trigger in _tagRule.triggers) {
+        if (cancelledText.contains(trigger)) {
+          // This cancelled range includes more than just a trigger. Reduce it back
+          // down to the trigger.
+          final triggerIndex = cancelledText.indexOf(trigger);
+          addedRange = node.selectionBetween(triggerIndex, triggerIndex);
+        }
       }
 
       changeRequests.addAll([
@@ -497,7 +523,7 @@ TagAroundPosition? _findTagUpstream({
       return null;
     }
 
-    if (currentCharacter == tagRule.trigger) {
+    if (tagRule.isTrigger(currentCharacter)) {
       // The character we are reading is the trigger.
       // We move the iteratorUpstream one last time to include the trigger in the tokenRange and stop looking any further upstream
       iteratorUpstream.moveBack();
@@ -509,7 +535,7 @@ TagAroundPosition? _findTagUpstream({
   final tokenRange = SpanRange(tokenStartOffset, splitIndex);
 
   final tagText = text.substringInRange(tokenRange);
-  if (!tagText.startsWith(tagRule.trigger)) {
+  if (!tagRule.doesTextStartWithTrigger(tagText)) {
     return null;
   }
 
@@ -520,7 +546,7 @@ TagAroundPosition? _findTagUpstream({
 
   return TagAroundPosition(
     indexedTag: IndexedTag(
-      Tag(tagRule.trigger, tagText.substring(1)),
+      Tag(tagRule.extractTriggerFrom(tagText)!, tagText.substring(1)),
       nodeId,
       tokenStartOffset,
     ),
@@ -528,14 +554,56 @@ TagAroundPosition? _findTagUpstream({
   );
 }
 
-const _composingActionTagKey = "composing_action_tag";
+extension ActionTagPluginDefaults on EditContext {
+  ComposingActionTag get composingActionTag => find<ComposingActionTag>(ActionTagsPlugin.defaultActionTagId);
 
-extension on EditContext {
-  ComposingActionTag get composingActionTag => find<ComposingActionTag>(_composingActionTagKey);
+  ComposingActionTag? get maybeComposingActionTag => findMaybe<ComposingActionTag>(ActionTagsPlugin.defaultActionTagId);
 }
 
-class ComposingActionTag with Editable {
-  IndexedTag? value;
+class ComposingActionTag with ChangeNotifier implements Editable {
+  IndexedTag? get value => _value;
+  IndexedTag? _value;
+  set value(IndexedTag? newValue) {
+    if (newValue == value) {
+      return;
+    }
+
+    _value = newValue;
+
+    _onChange();
+  }
+
+  bool _isInATransaction = false;
+  bool _didChange = false;
+
+  @override
+  void onTransactionStart() {
+    _isInATransaction = true;
+    _didChange = false;
+  }
+
+  void _onChange() {
+    if (!_isInATransaction) {
+      notifyListeners();
+      return;
+    }
+
+    _didChange = true;
+  }
+
+  @override
+  void onTransactionEnd(List<EditEvent> edits) {
+    _isInATransaction = false;
+    if (_didChange) {
+      _didChange = false;
+      notifyListeners();
+    }
+  }
+
+  @override
+  void reset() {
+    _value = null;
+  }
 }
 
 typedef OnUpdateComposingActionTag = void Function(IndexedTag? composingActionTag);

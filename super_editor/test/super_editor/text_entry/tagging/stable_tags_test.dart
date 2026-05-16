@@ -4,7 +4,6 @@ import 'package:flutter_test_runners/flutter_test_runners.dart';
 import 'package:super_editor/super_editor.dart';
 import 'package:super_editor/super_editor_test.dart';
 
-import '../../supereditor_test_tools.dart';
 import '../../test_documents.dart';
 
 void main() {
@@ -138,16 +137,17 @@ void main() {
 
       testWidgetsOnAllPlatforms("can be configured to continue after a space", (tester) async {
         await _pumpTestEditor(
-            tester,
-            MutableDocument(
-              nodes: [
-                ParagraphNode(
-                  id: "1",
-                  text: AttributedText("before "),
-                ),
-              ],
-            ),
-            const TagRule(trigger: "@"));
+          tester,
+          MutableDocument(
+            nodes: [
+              ParagraphNode(
+                id: "1",
+                text: AttributedText("before "),
+              ),
+            ],
+          ),
+          TagRule(trigger: "@"),
+        );
 
         // Place the caret at "before |"
         await tester.placeCaretInParagraph("1", 7);
@@ -1319,8 +1319,10 @@ void main() {
 Future<TestDocumentContext> _pumpTestEditor(
   WidgetTester tester,
   MutableDocument document, [
-  TagRule tagRule = userTagRule,
+  TagRule? tagRule,
 ]) async {
+  tagRule ??= userTagRule;
+
   return await tester
       .createDocument()
       .withCustomContent(document)

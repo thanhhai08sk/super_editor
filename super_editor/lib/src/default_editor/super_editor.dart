@@ -32,10 +32,10 @@ import 'package:super_editor/src/infrastructure/platforms/android/toolbar.dart';
 import 'package:super_editor/src/infrastructure/platforms/ios/toolbar.dart';
 import 'package:super_editor/src/infrastructure/platforms/mac/mac_ime.dart';
 import 'package:super_editor/src/infrastructure/platforms/platform.dart';
+import 'package:super_editor/src/infrastructure/render_sliver_ext.dart';
 import 'package:super_editor/src/infrastructure/signal_notifier.dart';
 import 'package:super_editor/src/infrastructure/text_input.dart';
 import 'package:super_editor/src/undo_redo.dart';
-import 'package:super_editor/src/infrastructure/render_sliver_ext.dart';
 import 'package:super_text_layout/super_text_layout.dart';
 
 import '../infrastructure/document_gestures_interaction_overrides.dart';
@@ -121,6 +121,7 @@ class SuperEditor extends StatefulWidget {
     this.selectionPolicies = const SuperEditorSelectionPolicies(),
     this.inputSource,
     this.softwareKeyboardController,
+    this.inputRole,
     this.imePolicies = const SuperEditorImePolicies(),
     this.imeConfiguration,
     this.imeOverrides,
@@ -141,6 +142,7 @@ class SuperEditor extends StatefulWidget {
     this.plugins = const {},
     this.debugPaint = const DebugPaintConfig(),
     this.shrinkWrap = false,
+    this.log = const SuperEditorPrintLog(),
   })  : stylesheet = stylesheet ?? defaultStylesheet,
         selectionStyles = selectionStyle ?? defaultSelectionStyle,
         componentBuilders = [
@@ -248,6 +250,21 @@ class SuperEditor extends StatefulWidget {
   /// the automatic behavior might conflict with commands to this controller.
   final SoftwareKeyboardController? softwareKeyboardController;
 
+  /// A name/ID that differentiates this [SuperEditor]'s purpose from any other [SuperEditor]
+  /// that might be on screen.
+  ///
+  /// The [inputRole] is used to control access to the operating system's IME. Imagine that you have
+  /// Editor1 and Editor2 on screen. You want Editor1 to be able to hold onto the IME connection
+  /// across widget tree rebuilds, which requires a global connection, but you don't want Editor2 to
+  /// accidentally take over that global IME connection. The solution is to pass a different [inputRole]
+  /// for Editor1 and Editor2.
+  ///
+  /// If you're sure that you'll only have one editor on screen, you don't need to provide an [inputRole].
+  ///
+  /// The value for [inputRole] is arbitrary. It can be any name you choose, so long as other editors
+  /// use different names.
+  final String? inputRole;
+
   /// Policies that dictate when and how [SuperEditor] should interact with the
   /// platform IME, such as automatically opening the software keyboard when
   /// [SuperEditor]'s selection changes.
@@ -278,7 +295,7 @@ class SuperEditor extends StatefulWidget {
   /// The `SuperEditor` gesture mode, e.g., mouse or touch.
   final DocumentGestureMode? gestureMode;
 
-  /// List of factories that creates a [ContentTapDelegate], which is given an
+  /// List of factories that create a [ContentTapDelegate], which is given an
   /// opportunity to respond to taps on content before the editor, itself.
   ///
   /// A [ContentTapDelegate] might be used, for example, to launch a URL
@@ -316,7 +333,7 @@ class SuperEditor extends StatefulWidget {
   /// If [keyboardActions] is `null`, [SuperEditor] uses [defaultKeyboardActions]
   /// when the gesture mode is [TextInputSource.keyboard], and
   /// [defaultImeKeyboardActions] when the gesture mode is [TextInputSource.ime].
-  final List<DocumentKeyboardAction>? keyboardActions;
+  final List<SuperEditorKeyboardAction>? keyboardActions;
 
   /// Handlers for all Mac OS "selectors" reported by the IME.
   ///
@@ -367,6 +384,14 @@ class SuperEditor extends StatefulWidget {
   /// Only used when editor is not inside an scrollable.
   final bool shrinkWrap;
 
+  /// A log that reports specific errors and exceptional events that occur while
+  /// running a [SuperEditor].
+  ///
+  /// This log was introduced to create a place to report errors to apps that those
+  /// apps might want to send to their own issue tracker to gain visibility into why
+  /// issues are happening in their editor.
+  final SuperEditorPrintLog? log;
+
   @override
   SuperEditorState createState() => SuperEditorState();
 }
@@ -399,6 +424,8 @@ class SuperEditorState extends State<SuperEditor> {
 
   @visibleForTesting
   late SuperEditorContext editContext;
+
+  late DocumentLayoutEditable _documentLayoutEditable;
 
   List<ContentTapDelegate>? _contentTapHandlers;
 
@@ -455,9 +482,10 @@ class SuperEditorState extends State<SuperEditor> {
 
     _isImeConnected = widget.isImeConnected ?? ValueNotifier(false);
 
+    _documentLayoutEditable = DocumentLayoutEditable(() => _docLayoutKey.currentState as DocumentLayout);
     widget.editor.context.put(
       Editor.layoutKey,
-      DocumentLayoutEditable(() => _docLayoutKey.currentState as DocumentLayout),
+      _documentLayoutEditable,
     );
 
     _createEditContext();
@@ -470,6 +498,7 @@ class SuperEditorState extends State<SuperEditor> {
 
     if (widget.focusNode != oldWidget.focusNode) {
       _focusNode = (widget.focusNode ?? FocusNode())..addListener(_onFocusChange);
+      _onFocusChange();
     }
 
     if (widget.documentLayoutKey != oldWidget.documentLayoutKey) {
@@ -491,13 +520,18 @@ class SuperEditorState extends State<SuperEditor> {
 
     if (widget.editor != oldWidget.editor) {
       for (final plugin in oldWidget.plugins) {
-        plugin.detach(oldWidget.editor);
+        plugin._detachFromSuperEditor(oldWidget.editor);
       }
 
-      oldWidget.editor.context.remove(Editor.layoutKey);
+      // Replace the old document layout `Editable` with a new one.
+      oldWidget.editor.context.remove(
+        Editor.layoutKey,
+        _documentLayoutEditable,
+      );
+      _documentLayoutEditable = DocumentLayoutEditable(() => _docLayoutKey.currentState as DocumentLayout);
       widget.editor.context.put(
         Editor.layoutKey,
-        DocumentLayoutEditable(() => _docLayoutKey.currentState as DocumentLayout),
+        _documentLayoutEditable,
       );
 
       _createEditContext();
@@ -534,10 +568,14 @@ class SuperEditorState extends State<SuperEditor> {
       }
     }
 
+    for (final plugin in widget.plugins) {
+      plugin._detachFromSuperEditor(widget.editor);
+    }
+
     _iosControlsController.dispose();
     _androidControlsController.dispose();
 
-    widget.editor.context.remove(Editor.layoutKey);
+    widget.editor.context.remove(Editor.layoutKey, _documentLayoutEditable);
 
     _focusNode.removeListener(_onFocusChange);
     if (widget.focusNode == null) {
@@ -570,7 +608,10 @@ class SuperEditorState extends State<SuperEditor> {
     );
 
     for (final plugin in widget.plugins) {
-      plugin.attach(widget.editor);
+      plugin._attachToSuperEditor(widget.editor);
+
+      // Notify plugin of focus state at time of attachment.
+      plugin.onFocusChange(_focusNode);
     }
 
     // The ContentTapDelegate depends upon the EditContext. Recreate the
@@ -634,6 +675,11 @@ class SuperEditorState extends State<SuperEditor> {
   void _onFocusChange() {
     _recomputeIfLayoutShouldShowCaret();
     _primaryFocusListener.value = _focusNode.hasPrimaryFocus;
+
+    // Notify plugins about focus change.
+    for (final plugin in widget.plugins) {
+      plugin.onFocusChange(_focusNode);
+    }
   }
 
   void _recomputeIfLayoutShouldShowCaret() {
@@ -663,7 +709,7 @@ class SuperEditorState extends State<SuperEditor> {
   TextInputSource get inputSource => widget.inputSource ?? TextInputSource.ime;
 
   /// Returns the key handlers that respond to keyboard events within [SuperEditor].
-  List<DocumentKeyboardAction> get _keyboardActions =>
+  List<SuperEditorKeyboardAction> get _keyboardActions =>
       widget.keyboardActions ??
       (inputSource == TextInputSource.ime ? defaultImeKeyboardActions : defaultKeyboardActions);
 
@@ -796,6 +842,7 @@ class SuperEditorState extends State<SuperEditor> {
           focusNode: _focusNode,
           autofocus: widget.autofocus,
           editContext: editContext,
+          inputRole: widget.inputRole,
           clearSelectionWhenEditorLosesFocus: widget.selectionPolicies.clearSelectionWhenEditorLosesFocus,
           clearSelectionWhenImeConnectionCloses: widget.selectionPolicies.clearSelectionWhenImeConnectionCloses,
           softwareKeyboardController: _softwareKeyboardController,
@@ -812,6 +859,7 @@ class SuperEditorState extends State<SuperEditor> {
           ],
           selectorHandlers: widget.selectorHandlers ?? defaultEditorSelectorHandlers,
           isImeConnected: _isImeConnected,
+          log: widget.log?.imeDeltas,
           child: child,
         );
     }
@@ -851,9 +899,27 @@ class SuperEditorState extends State<SuperEditor> {
           document: editContext.document,
           getDocumentLayout: () => _docLayoutKey.currentState as DocumentLayout,
           selection: _composer.selectionNotifier,
-          setSelection: (newSelection) => editContext.editor.execute([
-            ChangeSelectionRequest(newSelection, SelectionChangeType.pushCaret, SelectionReason.userInteraction),
-          ]),
+          setSelection: (newSelection) {
+            if (newSelection == null) {
+              editContext.editor.execute([
+                ChangeSelectionRequest(
+                  newSelection,
+                  SelectionChangeType.clearSelection,
+                  SelectionReason.userInteraction,
+                ),
+              ]);
+              return;
+            }
+
+            editContext.editor.execute([
+              ChangeSelectionRequest(
+                newSelection,
+                newSelection.isCollapsed ? SelectionChangeType.pushCaret : SelectionChangeType.expandSelection,
+                SelectionReason.userInteraction,
+              ),
+            ]);
+          },
+          isImeConnected: _isImeConnected,
           scrollChangeSignal: _scrollChangeSignal,
           dragHandleAutoScroller: _dragHandleAutoScroller,
           defaultToolbarBuilder: (overlayContext, mobileToolbarKey, focalPoint) => defaultAndroidEditorToolbarBuilder(
@@ -862,6 +928,7 @@ class SuperEditorState extends State<SuperEditor> {
             editContext.commonOps,
             SuperEditorAndroidControlsScope.rootOf(context),
             editContext.composer.selectionNotifier,
+            focalPoint,
           ),
           child: child,
         );
@@ -900,6 +967,7 @@ class SuperEditorState extends State<SuperEditor> {
           document: editContext.document,
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
+          isImeConnected: _isImeConnected,
           openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
           openKeyboardOnSelectionChange: widget.imePolicies.openKeyboardOnSelectionChange,
           openSoftwareKeyboard: _openSoftwareKeyboard,
@@ -921,6 +989,7 @@ class SuperEditorState extends State<SuperEditor> {
           document: editContext.document,
           getDocumentLayout: () => editContext.documentLayout,
           selection: editContext.composer.selectionNotifier,
+          isImeConnected: _isImeConnected,
           openKeyboardWhenTappingExistingSelection: widget.selectionPolicies.openKeyboardWhenTappingExistingSelection,
           openKeyboardOnSelectionChange: widget.imePolicies.openKeyboardOnSelectionChange,
           openSoftwareKeyboard: _openSoftwareKeyboard,
@@ -1038,9 +1107,11 @@ Widget defaultAndroidEditorToolbarBuilder(
   CommonEditorOperations editorOps,
   SuperEditorAndroidControlsController editorControlsController,
   ValueListenable<DocumentSelection?> selectionNotifier,
+  LeaderLink focalPoint,
 ) {
   return DefaultAndroidEditorToolbar(
     floatingToolbarKey: floatingToolbarKey,
+    focalPoint: focalPoint,
     editorOps: editorOps,
     editorControlsController: editorControlsController,
     selectionNotifier: selectionNotifier,
@@ -1055,9 +1126,11 @@ class DefaultAndroidEditorToolbar extends StatelessWidget {
     required this.editorOps,
     required this.editorControlsController,
     required this.selectionNotifier,
+    required this.focalPoint,
   });
 
   final Key? floatingToolbarKey;
+  final LeaderLink focalPoint;
   final CommonEditorOperations editorOps;
   final SuperEditorAndroidControlsController editorControlsController;
   final ValueListenable<DocumentSelection?> selectionNotifier;
@@ -1069,6 +1142,7 @@ class DefaultAndroidEditorToolbar extends StatelessWidget {
       builder: (context, selection, child) {
         return AndroidTextEditingFloatingToolbar(
           floatingToolbarKey: floatingToolbarKey,
+          focalPoint: focalPoint,
           onCopyPressed: selection == null || !selection.isCollapsed //
               ? _copy
               : null,
@@ -1156,7 +1230,36 @@ class _SelectionLeadersDocumentLayerBuilder implements SuperEditorLayerBuilder {
 /// from the plugin, so that the [SuperEditor] widget can pass those extensions as properties
 /// during a widget build.
 abstract class SuperEditorPlugin {
-  const SuperEditorPlugin();
+  SuperEditorPlugin();
+
+  /// The reference count of the number of times [_attachToSuperEditor] was
+  /// called for each editor.
+  ///
+  /// This reference count is here due to order of operation nuances in Flutter's
+  /// widget tree rebuild process. If a [SuperEditor] subtree is replaced with a new
+  /// one (which happens a lot without carefully using `GlobalKey`s), then this
+  /// plugin will be told to attach before being told to detach. Without reference
+  /// counting, we would then run attach (NEW), followed by detach (OLD), and undo
+  /// the attachment we just ran.
+  final _attachCount = <Editor, int>{};
+
+  void _attachToSuperEditor(Editor editor) {
+    _attachCount[editor] ??= 0;
+
+    if (_attachCount[editor] == 0) {
+      attach(editor);
+    }
+
+    _attachCount[editor] = _attachCount[editor]! + 1;
+  }
+
+  void _detachFromSuperEditor(Editor editor) {
+    _attachCount[editor] = _attachCount[editor]! - 1;
+
+    if (_attachCount[editor] == 0) {
+      detach(editor);
+    }
+  }
 
   /// Adds desired behaviors to the given [editor].
   void attach(Editor editor) {}
@@ -1164,8 +1267,15 @@ abstract class SuperEditorPlugin {
   /// Removes behaviors from the given [editor], which were added in [attach].
   void detach(Editor editor) {}
 
-  /// Additional [DocumentKeyboardAction]s that will be added to a given [SuperEditor] widget.
-  List<DocumentKeyboardAction> get keyboardActions => [];
+  /// Hook, which is invoked when the attached `SuperEditor` widget gains or
+  /// loses focus.
+  ///
+  /// This hook might be called at times when no change in focus actually took place.
+  /// It's the job of implementers to handle repeat invocations without focus changes.
+  void onFocusChange(FocusNode editorFocusNode) {}
+
+  /// Additional [SuperEditorKeyboardAction]s that will be added to a given [SuperEditor] widget.
+  List<SuperEditorKeyboardAction> get keyboardActions => [];
 
   /// Additional [ComponentBuilder]s that will be added to a given [SuperEditor] widget.
   List<ComponentBuilder> get componentBuilders => [];
@@ -1347,6 +1457,7 @@ const defaultComponentBuilders = <ComponentBuilder>[
   BlockquoteComponentBuilder(),
   ParagraphComponentBuilder(),
   ListItemComponentBuilder(),
+  BitmapImageComponentBuilder(),
   ImageComponentBuilder(),
   HorizontalRuleComponentBuilder(),
 ];
@@ -1371,7 +1482,7 @@ const defaultSuperEditorDocumentOverlayBuilders = <SuperEditorLayerBuilder>[
 ];
 
 /// Keyboard actions for the standard [SuperEditor].
-final defaultKeyboardActions = <DocumentKeyboardAction>[
+final defaultKeyboardActions = <SuperEditorKeyboardAction>[
   toggleInteractionModeWhenCmdOrCtrlPressed,
   doNothingWhenThereIsNoSelection,
   scrollOnPageUpKeyPress,
@@ -1426,7 +1537,7 @@ final defaultKeyboardActions = <DocumentKeyboardAction>[
 ///
 /// Using the IME on desktop involves partial input from the IME
 /// and partial input from non-content keys, like arrow keys.
-final defaultImeKeyboardActions = <DocumentKeyboardAction>[
+final defaultImeKeyboardActions = <SuperEditorKeyboardAction>[
   toggleInteractionModeWhenCmdOrCtrlPressed,
   pasteWhenCmdVIsPressed,
   copyWhenCmdCIsPressed,
@@ -1743,3 +1854,16 @@ TextStyle defaultStyleBuilder(Set<Attribution> attributions) {
 const defaultSelectionStyle = SelectionStyles(
   selectionColor: Color(0xFFACCEF7),
 );
+
+/// A log that reports specific important errors and exceptional situations that
+/// happen when running a [SuperEditor].
+abstract class SuperEditorLog {
+  TextDeltasDocumentEditorLog get imeDeltas;
+}
+
+class SuperEditorPrintLog implements SuperEditorLog {
+  const SuperEditorPrintLog() : imeDeltas = const ConsolePrintTextDeltasDocumentEditorLog();
+
+  @override
+  final ConsolePrintTextDeltasDocumentEditorLog imeDeltas;
+}

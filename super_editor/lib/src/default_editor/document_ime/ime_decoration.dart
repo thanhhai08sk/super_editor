@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:super_editor/src/infrastructure/_logging.dart';
 
@@ -70,7 +71,19 @@ abstract class TextInputConnectionDecorator implements TextInputConnection {
 class DeltaTextInputClientDecorator with DeltaTextInputClient, TextInputClient {
   DeltaTextInputClientDecorator([this._client]);
 
-  set client(DeltaTextInputClient? client) => _client = client;
+  /// Returns `true` if [client] is the current client for this decorator.
+  ///
+  /// This check is provided to users so that users can check if they're still
+  /// the client before `null`'ing it out. E.g., Client1 registers itself as
+  /// the client, then Client2 takes over and registers itself as the client,
+  /// and then finally Client1 disposes and needs to know whether to remove
+  /// itself as the client, or not.
+  bool isCurrentClient(DeltaTextInputClient client) => _client == client;
+
+  set client(DeltaTextInputClient? client) {
+    _client = client;
+  }
+
   DeltaTextInputClient? _client;
 
   @override
