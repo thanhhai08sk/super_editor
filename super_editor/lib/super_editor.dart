@@ -128,16 +128,9 @@ export 'src/super_reader/reader_context.dart';
 export 'src/super_reader/super_reader.dart';
 export 'src/super_reader/tasks.dart';
 
-// Markdown Serialization
-export 'src/infrastructure/serialization/markdown/document_to_markdown_serializer.dart';
-export 'src/infrastructure/serialization/markdown/image_syntax.dart';
-export 'src/infrastructure/serialization/markdown/markdown_inline_parser.dart';
-export 'src/infrastructure/serialization/markdown/markdown_inline_upstream_plugin.dart';
-export 'src/infrastructure/serialization/markdown/markdown_to_attributed_text_parsing.dart';
-export 'src/infrastructure/serialization/markdown/markdown_to_document_parsing.dart';
-export 'src/infrastructure/serialization/markdown/super_editor_paste_markdown.dart';
-export 'src/infrastructure/serialization/markdown/super_editor_syntax.dart';
-export 'src/infrastructure/serialization/markdown/table.dart';
+// Markdown Serialization — re-exports removed because super_editor_markdown
+// package provides the same symbols. Internal super_editor code still uses
+// these files via direct imports.
 
 // Quill Serialization
 export 'src/infrastructure/serialization/quill/parsing/block_formats.dart';
