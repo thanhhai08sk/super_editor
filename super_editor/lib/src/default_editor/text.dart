@@ -540,6 +540,8 @@ mixin TextComponentViewModel on SingleColumnLayoutComponentViewModel {
   Set<CustomUnderline> customUnderlines = {};
   CustomUnderlineStyles? customUnderlineStyles;
 
+  List<TextBackgroundChipRange> backgroundChips = const [];
+
   /// Whether to underline the [composingRegion].
   ///
   /// Showing the underline is optional because the behavior differs between
@@ -582,6 +584,7 @@ mixin TextComponentViewModel on SingleColumnLayoutComponentViewModel {
       ..highlightWhenEmpty = highlightWhenEmpty
       ..customUnderlines = Set.from(customUnderlines)
       ..customUnderlineStyles = customUnderlineStyles?.copy()
+      ..backgroundChips = List.from(backgroundChips)
       ..spellingErrorUnderlineStyle = spellingErrorUnderlineStyle
       ..spellingErrors = List.from(spellingErrors)
       ..grammarErrorUnderlineStyle = grammarErrorUnderlineStyle
@@ -667,7 +670,8 @@ mixin TextComponentViewModel on SingleColumnLayoutComponentViewModel {
           showComposingRegionUnderline == other.showComposingRegionUnderline &&
           const DeepCollectionEquality().equals(customUnderlines, other.customUnderlines) &&
           const DeepCollectionEquality().equals(spellingErrors, other.spellingErrors) &&
-          const DeepCollectionEquality().equals(grammarErrors, other.grammarErrors);
+          const DeepCollectionEquality().equals(grammarErrors, other.grammarErrors) &&
+          const DeepCollectionEquality().equals(backgroundChips, other.backgroundChips);
 
   int get textViewModelHashCode =>
       super.hashCode ^
@@ -689,7 +693,8 @@ mixin TextComponentViewModel on SingleColumnLayoutComponentViewModel {
       grammarErrorUnderlineStyle.hashCode ^
       grammarErrors.hashCode ^
       composingRegion.hashCode ^
-      showComposingRegionUnderline.hashCode;
+      showComposingRegionUnderline.hashCode ^
+      const DeepCollectionEquality().hash(backgroundChips);
 }
 
 /// Keys to access metadata that are specific to a [TextNode].
@@ -721,6 +726,7 @@ class TextWithHintComponent extends StatefulWidget {
     this.selectionColor = Colors.lightBlueAccent,
     this.highlightWhenEmpty = false,
     this.underlines = const [],
+    this.backgroundChips = const [],
     this.showDebugPaint = false,
   }) : super(key: key);
 
@@ -744,6 +750,7 @@ class TextWithHintComponent extends StatefulWidget {
   final Color selectionColor;
   final bool highlightWhenEmpty;
   final List<Underlines> underlines;
+  final List<TextBackgroundChipRange> backgroundChips;
 
   final bool showDebugPaint;
 
@@ -799,6 +806,7 @@ class _TextWithHintComponentState extends State<TextWithHintComponent>
           selectionColor: widget.selectionColor,
           highlightWhenEmpty: widget.highlightWhenEmpty,
           underlines: widget.underlines,
+          backgroundChips: widget.backgroundChips,
           showDebugPaint: widget.showDebugPaint,
         ),
       ],
@@ -825,6 +833,7 @@ class TextComponent extends StatefulWidget {
     this.selectionColor = Colors.lightBlueAccent,
     this.highlightWhenEmpty = false,
     this.underlines = const [],
+    this.backgroundChips = const [],
     this.showDebugPaint = false,
   }) : super(key: key);
 
@@ -867,6 +876,12 @@ class TextComponent extends StatefulWidget {
   /// applies to those underlines. Multiple styles of underlines are displayed by providing
   /// multiple [Underlines].
   final List<Underlines> underlines;
+
+  /// Background chip ranges to paint behind the text.
+  ///
+  /// Each [TextBackgroundChipRange] specifies a text range and a [TextBackgroundChipStyle]
+  /// that controls the chip's color, padding, and corner radius.
+  final List<TextBackgroundChipRange> backgroundChips;
 
   final bool showDebugPaint;
 
@@ -1299,6 +1314,13 @@ class TextComponentState extends State<TextComponent> with DocumentComponent imp
         layerBeneathBuilder: (context, textLayout) {
           return Stack(
             children: [
+              // Background chips paint first (lowest layer) so selection highlights
+              // paint on top and remain visually dominant.
+              if (widget.backgroundChips.isNotEmpty)
+                TextBackgroundChipLayer(
+                  textLayout: textLayout,
+                  chips: widget.backgroundChips,
+                ),
               // Selection highlight beneath the text.
               if (widget.text.length > 0)
                 TextLayoutSelectionHighlight(

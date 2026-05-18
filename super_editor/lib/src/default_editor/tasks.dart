@@ -404,6 +404,7 @@ class _TaskComponentState extends State<TaskComponent> with ProxyDocumentCompone
               selectionColor: widget.viewModel.selectionColor,
               highlightWhenEmpty: widget.viewModel.highlightWhenEmpty,
               underlines: widget.viewModel.createUnderlines(),
+              backgroundChips: widget.viewModel.backgroundChips,
               showDebugPaint: widget.showDebugPaint,
             ),
           ),

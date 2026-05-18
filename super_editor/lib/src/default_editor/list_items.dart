@@ -210,6 +210,7 @@ class ListItemComponentBuilder implements ComponentBuilder {
         selectionColor: componentViewModel.selectionColor,
         highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
         underlines: componentViewModel.createUnderlines(),
+        backgroundChips: componentViewModel.backgroundChips,
         inlineWidgetBuilders: componentViewModel.inlineWidgetBuilders,
       );
     } else if (componentViewModel is OrderedListItemComponentViewModel) {
@@ -226,6 +227,7 @@ class ListItemComponentBuilder implements ComponentBuilder {
         selectionColor: componentViewModel.selectionColor,
         highlightWhenEmpty: componentViewModel.highlightWhenEmpty,
         underlines: componentViewModel.createUnderlines(),
+        backgroundChips: componentViewModel.backgroundChips,
         inlineWidgetBuilders: componentViewModel.inlineWidgetBuilders,
       );
     }
@@ -532,6 +534,7 @@ class UnorderedListItemComponent extends StatefulWidget {
     this.caretColor = Colors.black,
     this.highlightWhenEmpty = false,
     this.underlines = const [],
+    this.backgroundChips = const [],
     this.showDebugPaint = false,
   }) : super(key: key);
 
@@ -554,6 +557,7 @@ class UnorderedListItemComponent extends StatefulWidget {
   final bool highlightWhenEmpty;
 
   final List<Underlines> underlines;
+  final List<TextBackgroundChipRange> backgroundChips;
 
   final bool showDebugPaint;
 
@@ -619,6 +623,7 @@ class _UnorderedListItemComponentState extends State<UnorderedListItemComponent>
                 selectionColor: widget.selectionColor,
                 highlightWhenEmpty: widget.highlightWhenEmpty,
                 underlines: widget.underlines,
+                backgroundChips: widget.backgroundChips,
                 showDebugPaint: widget.showDebugPaint,
               ),
             ),
@@ -713,6 +718,7 @@ class OrderedListItemComponent extends StatefulWidget {
     this.caretColor = Colors.black,
     this.highlightWhenEmpty = false,
     this.underlines = const [],
+    this.backgroundChips = const [],
     this.showDebugPaint = false,
   }) : super(key: key);
 
@@ -736,6 +742,7 @@ class OrderedListItemComponent extends StatefulWidget {
   final bool highlightWhenEmpty;
 
   final List<Underlines> underlines;
+  final List<TextBackgroundChipRange> backgroundChips;
 
   final bool showDebugPaint;
 
@@ -802,6 +809,7 @@ class _OrderedListItemComponentState extends State<OrderedListItemComponent> {
                 selectionColor: widget.selectionColor,
                 highlightWhenEmpty: widget.highlightWhenEmpty,
                 underlines: widget.underlines,
+                backgroundChips: widget.backgroundChips,
                 showDebugPaint: widget.showDebugPaint,
               ),
             ),
