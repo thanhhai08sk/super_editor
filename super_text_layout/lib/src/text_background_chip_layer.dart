@@ -126,6 +126,16 @@ class _TextBackgroundChipPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_TextBackgroundChipPainter oldDelegate) {
-    return !const DeepCollectionEquality().equals(boxesPerChip, oldDelegate.boxesPerChip);
+    if (boxesPerChip.length != oldDelegate.boxesPerChip.length) return true;
+    const listEq = ListEquality<TextBox>();
+    for (var i = 0; i < boxesPerChip.length; i++) {
+      final a = boxesPerChip[i];
+      final b = oldDelegate.boxesPerChip[i];
+      if (a.style != b.style) return true;
+      // Dart record == compares fields positionally, but the `boxes` field is
+      // a List whose == is identity. Recompare deeply with ListEquality.
+      if (!listEq.equals(a.boxes, b.boxes)) return true;
+    }
+    return false;
   }
 }
