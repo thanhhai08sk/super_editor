@@ -464,6 +464,19 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
       return;
     }
 
+    if (widget.contentTapHandler != null) {
+      final result = widget.contentTapHandler!.onLongPress(
+        DocumentTapDetails(
+          documentLayout: _docLayout,
+          layoutOffset: tapDownDocumentOffset,
+          globalOffset: _globalTapDownOffset!,
+        ),
+      );
+      if (result == TapHandlingInstruction.halt) {
+        return;
+      }
+    }
+
     _globalDragOffset = _globalTapDownOffset;
     _longPressStrategy = IosLongPressSelectionStrategy(
       document: widget.readerContext.document,

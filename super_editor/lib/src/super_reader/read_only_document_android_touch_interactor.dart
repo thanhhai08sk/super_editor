@@ -479,6 +479,25 @@ class _ReadOnlyAndroidDocumentTouchInteractorState extends State<ReadOnlyAndroid
 
   // Runs when a tap down has lasted long enough to signify a long-press.
   void _onLongPressDown() {
+    if (widget.contentTapHandler != null) {
+      final tapDownDocumentOffset =
+          _getDocumentOffsetFromGlobalOffset(_globalTapDownOffset!);
+      final result = widget.contentTapHandler!.onLongPress(
+        DocumentTapDetails(
+          documentLayout: _docLayout,
+          layoutOffset: tapDownDocumentOffset,
+          globalOffset: _globalTapDownOffset!,
+        ),
+      );
+      if (result == TapHandlingInstruction.halt) {
+        // Handler consumed the long-press; do not start selection.
+        // No extra cleanup needed: _longPressStrategy is still null,
+        // so _isLongPressInProgress will be false at tap-up/pan time
+        // and the existing strategy-null guards hold.
+        return;
+      }
+    }
+
     _longPressStrategy = AndroidDocumentLongPressSelectionStrategy(
       document: widget.readerContext.document,
       documentLayout: _docLayout,

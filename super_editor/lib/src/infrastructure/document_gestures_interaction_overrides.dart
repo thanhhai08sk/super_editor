@@ -28,6 +28,10 @@ abstract class ContentTapDelegate with ChangeNotifier {
     return TapHandlingInstruction.continueHandling;
   }
 
+  TapHandlingInstruction onLongPress(DocumentTapDetails details) {
+    return TapHandlingInstruction.continueHandling;
+  }
+
   TapHandlingInstruction onTripleTap(DocumentTapDetails details) {
     return TapHandlingInstruction.continueHandling;
   }
