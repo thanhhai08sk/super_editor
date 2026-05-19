@@ -32,6 +32,17 @@ abstract class ContentTapDelegate with ChangeNotifier {
     return TapHandlingInstruction.continueHandling;
   }
 
+  /// Fires the moment a finger touches down on the document, before any
+  /// long-press timer or selection logic. Informational only — return value
+  /// is ignored. Use to drive pressed-state visuals on tappable content.
+  void onTapDown(DocumentTapDetails details) {}
+
+  /// Fires whenever a live tap is no longer pressed against the document:
+  /// the finger lifted ([onTapUp]-equivalent), the tap was cancelled, or it
+  /// transitioned into a pan / long-press selection. Pairs with [onTapDown]
+  /// for symmetric pressed-state lifecycle.
+  void onTapErased() {}
+
   TapHandlingInstruction onTripleTap(DocumentTapDetails details) {
     return TapHandlingInstruction.continueHandling;
   }

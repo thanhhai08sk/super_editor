@@ -442,11 +442,24 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
     _globalTapDownOffset = details.globalPosition;
     _tapDownLongPressTimer?.cancel();
     _tapDownLongPressTimer = Timer(kLongPressTimeout, _onLongPressDown);
+
+    if (widget.contentTapHandler != null) {
+      final interactorOffset = interactorBox.globalToLocal(_globalTapDownOffset!);
+      final tapDownDocumentOffset = _interactorOffsetToDocumentOffset(interactorOffset);
+      widget.contentTapHandler!.onTapDown(
+        DocumentTapDetails(
+          documentLayout: _docLayout,
+          layoutOffset: tapDownDocumentOffset,
+          globalOffset: _globalTapDownOffset!,
+        ),
+      );
+    }
   }
 
   void _onTapCancel() {
     _tapDownLongPressTimer?.cancel();
     _tapDownLongPressTimer = null;
+    widget.contentTapHandler?.onTapErased();
   }
 
   // Runs when a tap down has lasted long enough to signify a long-press.
@@ -503,6 +516,7 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
     // Stop waiting for a long-press to start.
     _globalTapDownOffset = null;
     _tapDownLongPressTimer?.cancel();
+    widget.contentTapHandler?.onTapErased();
     _controlsController!.hideMagnifier();
 
     final selection = widget.readerContext.composer.selection;
@@ -670,6 +684,7 @@ class _SuperReaderIosDocumentTouchInteractorState extends State<SuperReaderIosDo
     // Stop waiting for a long-press to start, if a long press isn't already in-progress.
     _globalTapDownOffset = null;
     _tapDownLongPressTimer?.cancel();
+    widget.contentTapHandler?.onTapErased();
 
     // TODO: to help the user drag handles instead of scrolling, try checking touch
     //       placement during onTapDown, and then pick that up here. I think the little

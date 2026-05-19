@@ -470,11 +470,23 @@ class _ReadOnlyAndroidDocumentTouchInteractorState extends State<ReadOnlyAndroid
     _globalTapDownOffset = details.globalPosition;
     _tapDownLongPressTimer?.cancel();
     _tapDownLongPressTimer = Timer(kLongPressTimeout, _onLongPressDown);
+
+    if (widget.contentTapHandler != null) {
+      final tapDownDocumentOffset = _getDocumentOffsetFromGlobalOffset(_globalTapDownOffset!);
+      widget.contentTapHandler!.onTapDown(
+        DocumentTapDetails(
+          documentLayout: _docLayout,
+          layoutOffset: tapDownDocumentOffset,
+          globalOffset: _globalTapDownOffset!,
+        ),
+      );
+    }
   }
 
   void _onTapCancel() {
     _tapDownLongPressTimer?.cancel();
     _tapDownLongPressTimer = null;
+    widget.contentTapHandler?.onTapErased();
   }
 
   // Runs when a tap down has lasted long enough to signify a long-press.
@@ -527,6 +539,7 @@ class _ReadOnlyAndroidDocumentTouchInteractorState extends State<ReadOnlyAndroid
     // Stop waiting for a long-press to start.
     _globalTapDownOffset = null;
     _tapDownLongPressTimer?.cancel();
+    widget.contentTapHandler?.onTapErased();
 
     // Cancel any on-going long-press.
     if (_isLongPressInProgress) {
@@ -700,6 +713,7 @@ class _ReadOnlyAndroidDocumentTouchInteractorState extends State<ReadOnlyAndroid
     // Stop waiting for a long-press to start, if a long press isn't already in-progress.
     _globalTapDownOffset = null;
     _tapDownLongPressTimer?.cancel();
+    widget.contentTapHandler?.onTapErased();
 
     _globalStartDragOffset = details.globalPosition;
     _dragStartInDoc = _getDocumentOffsetFromGlobalOffset(details.globalPosition);
