@@ -63,6 +63,18 @@ class TextDeltasDocumentEditor {
       editorImeDeltasLog.fine(delta);
     }
 
+    if (selection.value == null) {
+      // The IME delivered deltas while the document has no selection. This can
+      // happen as a race when the IME connection is closing (or has just
+      // cleared the selection) but a pending keystroke delta still arrives.
+      // Without a selection there's no document position to apply the deltas to,
+      // so we drop them instead of dereferencing a null selection (which threw a
+      // "Null check operator used on a null value" in DocumentImeSerializer).
+      editorImeLog.warning(
+          "Received IME deltas but the document has no selection. Ignoring the deltas.");
+      return;
+    }
+
     // Apply deltas to the document.
     editorImeLog.fine("Serializing document to perform IME operations");
     _serializedDoc = DocumentImeSerializer(
