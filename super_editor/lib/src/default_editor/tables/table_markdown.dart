@@ -355,7 +355,8 @@ class _MarkdownTableComponentState extends State<MarkdownTableComponent> {
       TableComponentFit.scroll => SingleAxisTrackpadAndWheelScroller(
           axis: Axis.horizontal,
           controller: _scrollController,
-          child: Center(
+          child: Align(
+            alignment: Alignment.centerLeft,
             child: _ScrollbarWithoutGap(
               scrollController: _scrollController,
               scrollbarOrientation: ScrollbarOrientation.bottom,

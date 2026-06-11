@@ -303,7 +303,7 @@ class TextDeltasDocumentEditor {
 
     if (delta.textInserted == "\t" && (defaultTargetPlatform == TargetPlatform.iOS)) {
       // On iOS, tabs pressed at the the software keyboard are reported here.
-      commonOps.indentListItem();
+      commonOps.indentSelectedContent();
 
       // Update the local IME value that changes with each delta.
       _previousImeValue = delta.apply(_previousImeValue);
@@ -376,7 +376,7 @@ class TextDeltasDocumentEditor {
 
     if (delta.replacementText == "\t" && (defaultTargetPlatform == TargetPlatform.iOS)) {
       // On iOS, tabs pressed at the the software keyboard are reported here.
-      commonOps.indentListItem();
+      commonOps.indentSelectedContent();
       return;
     }
 

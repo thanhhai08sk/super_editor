@@ -831,11 +831,11 @@ void moveToRightEndOfLineAndModifySelection(SuperEditorContext context) {
 }
 
 void indentListItem(SuperEditorContext context) {
-  context.commonOps.indentListItem();
+  context.commonOps.indentSelectedContent();
 }
 
 void unIndentListItem(SuperEditorContext context) {
-  context.commonOps.unindentListItem();
+  context.commonOps.unIndentSelectedContent();
 }
 
 void insertNewLine(SuperEditorContext context) {

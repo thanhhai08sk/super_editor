@@ -2160,6 +2160,51 @@ class CommonEditorOperations {
     return true;
   }
 
+  /// Indents the content at the selection extent regardless of node type:
+  /// list items and pure paragraphs are handled natively; any other single text
+  /// node is delegated via [IndentNodeRequest] for the host app to handle.
+  /// Headings/blockquotes/code paragraphs are NOT indentable. Requires a
+  /// single-node (base == extent) selection.
+  bool indentSelectedContent() {
+    final selection = composer.selection;
+    if (selection == null) return false;
+    if (selection.base.nodeId != selection.extent.nodeId) return false;
+    final node = document.getNodeById(selection.extent.nodeId);
+    if (node == null) return false;
+    if (node is ListItemNode) {
+      editor.execute([IndentListItemRequest(nodeId: node.id)]);
+      return true;
+    }
+    if (node is ParagraphNode) {
+      final blockType = node.metadata['blockType'];
+      if (blockType != null && blockType != paragraphAttribution) return false;
+      editor.execute([IndentParagraphRequest(node.id)]);
+      return true;
+    }
+    editor.execute([IndentNodeRequest(node.id)]);
+    return true;
+  }
+
+  bool unIndentSelectedContent() {
+    final selection = composer.selection;
+    if (selection == null) return false;
+    if (selection.base.nodeId != selection.extent.nodeId) return false;
+    final node = document.getNodeById(selection.extent.nodeId);
+    if (node == null) return false;
+    if (node is ListItemNode) {
+      editor.execute([UnIndentListItemRequest(nodeId: node.id)]);
+      return true;
+    }
+    if (node is ParagraphNode) {
+      final blockType = node.metadata['blockType'];
+      if (blockType != null && blockType != paragraphAttribution) return false;
+      editor.execute([UnIndentParagraphRequest(node.id)]);
+      return true;
+    }
+    editor.execute([UnIndentNodeRequest(node.id)]);
+    return true;
+  }
+
   /// Converts the [TextNode] with the current [DocumentComposer] selection
   /// extent to a [ListItemNode] of the given [type], or does nothing if the
   /// current node is not a [TextNode], or if the current selection spans
@@ -2661,6 +2706,19 @@ class DeleteUpstreamCharacterCommand extends EditCommand {
       // so that it's not incorrect or invalid.
       ..executeCommand(ChangeComposingRegionCommand(null));
   }
+}
+
+/// Indent the single text node at the current selection extent when it is
+/// neither a [ListItemNode] nor a [ParagraphNode]. Handled by app-registered
+/// command handlers (e.g. checkbox items); no-op if unrecognized.
+class IndentNodeRequest implements EditRequest {
+  const IndentNodeRequest(this.nodeId);
+  final String nodeId;
+}
+
+class UnIndentNodeRequest implements EditRequest {
+  const UnIndentNodeRequest(this.nodeId);
+  final String nodeId;
 }
 
 class DeleteDownstreamCharacterRequest implements EditRequest {
