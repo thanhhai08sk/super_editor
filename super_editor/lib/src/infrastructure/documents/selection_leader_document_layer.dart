@@ -97,23 +97,32 @@ class _SelectionLeadersDocumentLayerState
       return null;
     }
 
-    if (documentSelection.isCollapsed) {
-      return DocumentSelectionLayout(
-        caret: documentLayout.getRectForPosition(documentSelection.extent)!,
-      );
-    } else {
-      return DocumentSelectionLayout(
-        upstream: documentLayout.getRectForPosition(
-          widget.document.selectUpstreamPosition(documentSelection.base, documentSelection.extent),
-        )!,
-        downstream: documentLayout.getRectForPosition(
-          widget.document.selectDownstreamPosition(documentSelection.base, documentSelection.extent),
-        )!,
-        expandedSelectionBounds: documentLayout.getRectForSelection(
-          documentSelection.base,
-          documentSelection.extent,
-        ),
-      );
+    try {
+      if (documentSelection.isCollapsed) {
+        return DocumentSelectionLayout(
+          caret: documentLayout.getRectForPosition(documentSelection.extent)!,
+        );
+      } else {
+        return DocumentSelectionLayout(
+          upstream: documentLayout.getRectForPosition(
+            widget.document.selectUpstreamPosition(documentSelection.base, documentSelection.extent),
+          )!,
+          downstream: documentLayout.getRectForPosition(
+            widget.document.selectDownstreamPosition(documentSelection.base, documentSelection.extent),
+          )!,
+          expandedSelectionBounds: documentLayout.getRectForSelection(
+            documentSelection.base,
+            documentSelection.extent,
+          ),
+        );
+      }
+    } catch (_) {
+      // The selected component exists but its inner text layout hasn't been built
+      // yet (e.g. a component was just inserted, or we're on the first frame after
+      // a rebuild), so `getRectForPosition` reads a null `ProseTextLayout` and
+      // throws. This is the same kind of momentary transitive state handled above:
+      // return null and let this method run again once layout completes.
+      return null;
     }
   }
 
