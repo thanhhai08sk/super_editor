@@ -1320,6 +1320,7 @@ class TextComponentState extends State<TextComponent> with DocumentComponent imp
                 TextBackgroundChipLayer(
                   textLayout: textLayout,
                   chips: widget.backgroundChips,
+                  text: widget.text.toPlainText(),
                 ),
               // Selection highlight beneath the text.
               if (widget.text.length > 0)

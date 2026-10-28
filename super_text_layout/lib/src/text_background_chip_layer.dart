@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:collection/collection.dart';
@@ -15,10 +16,16 @@ class TextBackgroundChipLayer extends StatefulWidget {
     Key? key,
     required this.textLayout,
     required this.chips,
+    this.text,
   }) : super(key: key);
 
   final TextLayout textLayout;
   final List<TextBackgroundChipRange> chips;
+
+  /// The laid-out text, placeholders included. When given, a chip that wraps
+  /// leaves out the space at the line end, which the layout otherwise returns
+  /// as part of the last word's boxes.
+  final String? text;
 
   @override
   State<TextBackgroundChipLayer> createState() => _TextBackgroundChipLayerState();
@@ -36,10 +43,7 @@ class _TextBackgroundChipLayerState extends State<TextBackgroundChipLayer> {
       for (final chip in widget.chips)
         (
           style: chip.style,
-          boxes: widget.textLayout.getBoxesForSelection(
-            TextSelection(baseOffset: chip.range.start, extentOffset: chip.range.end),
-            boxHeightStyle: BoxHeightStyle.max,
-          ),
+          boxes: _chipBoxes(chip.range),
         ),
     ];
 
@@ -47,6 +51,40 @@ class _TextBackgroundChipLayerState extends State<TextBackgroundChipLayer> {
       size: Size.infinite,
       painter: _TextBackgroundChipPainter(boxesPerChip),
     );
+  }
+
+  List<TextBox> _boxes(int start, int end) => widget.textLayout.getBoxesForSelection(
+        TextSelection(baseOffset: start, extentOffset: end),
+        boxHeightStyle: BoxHeightStyle.max,
+      );
+
+  /// One box per line the range covers, built from its words.
+  List<TextBox> _chipBoxes(TextRange range) {
+    final text = widget.text;
+    if (text == null || range.end > text.length) {
+      return _boxes(range.start, range.end);
+    }
+    final lines = <double, TextBox>{};
+    for (final word in RegExp(r'\S+').allMatches(range.textInside(text))) {
+      final end = range.start + word.end;
+      final spaceAfter = RegExp(r'\s+').matchAsPrefix(text, end);
+      final spaceBoxes = spaceAfter == null ? const <TextBox>[] : _boxes(end, spaceAfter.end);
+      for (final box in _boxes(range.start + word.start, end)) {
+        if (spaceBoxes.any((space) => space.left == box.left && space.top == box.top)) continue;
+        lines.update(
+          box.top.roundToDouble(),
+          (line) => TextBox.fromLTRBD(
+            min(line.left, box.left),
+            min(line.top, box.top),
+            max(line.right, box.right),
+            max(line.bottom, box.bottom),
+            line.direction,
+          ),
+          ifAbsent: () => box,
+        );
+      }
+    }
+    return lines.values.toList();
   }
 }
 
